@@ -1,0 +1,4 @@
+venv-aimguard/ 
+__pycache__/ 
+*.pt  .env 
+logs 
