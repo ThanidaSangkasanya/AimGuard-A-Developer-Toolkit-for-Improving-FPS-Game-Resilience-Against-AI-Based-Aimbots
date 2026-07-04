@@ -1,10 +1,12 @@
 import os, sys, time, argparse
+import warnings
+warnings.filterwarnings("ignore")
+os.environ["PYTHONWARNINGS"] = "ignore"
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from PIL import Image, ImageDraw
-from pytorch_msssim import ssim as ssim_fn
 import pandas as pd
 import matplotlib; matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -15,25 +17,25 @@ load_dotenv()
 NANODET_ROOT   = os.environ.get('NANODET_ROOT',   os.path.join(os.path.dirname(__file__), 'third_party', 'nanodet'))
 RTDETR_WEIGHTS = os.environ.get('RTDETR_WEIGHTS', os.path.join('pretrained_models', 'rtdetr-l.pt'))
 DATASET_ROOT   = os.environ.get('DATASET_ROOT',   os.path.join(os.path.dirname(__file__), 'data'))
-GT_ROOT        = os.environ.get('GT_ROOT',        os.path.join(os.path.dirname(__file__), 'ground_truth_dataset'))
+
 
 # ─── ARGUMENTS ───────────────────────────────────────────────
 parser = argparse.ArgumentParser()
 parser.add_argument('--game',         required=True, type=str,
-                    choices=['cs2', 'cf', 'valorant', 'overwatch'])
+                    help='Game name (any name is accepted)')
+parser.add_argument('--data_path',    default=None,  type=str,
+                    help='Direct path to dataset folder (overrides DATASET_ROOT)')
 parser.add_argument('--model',        required=True, type=str,
                     choices=['yolov5n', 'nanodet', 'rtdetr'])
 parser.add_argument('--epsilon',      default=8,     type=int)
 parser.add_argument('--conf',         default=0.4,   type=float,
                     help='Confidence threshold for DSR (default: 0.4)')
-parser.add_argument('--conf_recall',  default=0.2,   type=float,
-                    help='Confidence threshold for Recall (default: 0.2)')
-parser.add_argument('--iou_thr',      default=0.5,   type=float,
-                    help='IoU threshold for TP (default: 0.5)')
+
+
 parser.add_argument('--gpu',          default='0',   type=str)
 args = parser.parse_args()
 
-DEVICE = f'cuda:{args.gpu}'
+DEVICE = args.gpu if args.gpu == 'cpu' else f'cuda:{args.gpu}'
 EPS    = args.epsilon / 255.0
 GAME   = args.game
 MODEL  = args.model
@@ -41,27 +43,10 @@ MODEL  = args.model
 MODEL_SIZE  = {'yolov5n': 416, 'nanodet': 320, 'rtdetr': 640}
 MODEL_INPUT = MODEL_SIZE[MODEL]
 
-GAME_FOLDER = {'cs2': 'CS2', 'cf': 'CF', 'valorant': 'Valorant', 'overwatch': 'Overwatch'}
-DATA_PATH   = os.path.join(DATASET_ROOT, GAME_FOLDER[GAME])
-GT_PATH     = os.path.join(GT_ROOT, GAME_FOLDER[GAME], 'labels')
-NOISE_PATH  = os.path.join('universal_cloak', GAME, MODEL, 'universal_noise.pt')
+DATA_PATH  = args.data_path if args.data_path else os.path.join(DATASET_ROOT, GAME)
+NOISE_PATH = os.path.join('universal_cloak', GAME, MODEL, 'universal_noise.pt')
 
-# Baseline Recall (before cloak) at conf=0.2
-BASELINE_RECALL = {
-    ('yolov5n', 'cs2'):       0.9427,
-    ('yolov5n', 'cf'):        0.7500,
-    ('yolov5n', 'valorant'):  0.6792,
-    ('yolov5n', 'overwatch'): 0.1268,
-    ('rtdetr',  'cs2'):       0.9868,
-    ('rtdetr',  'cf'):        1.0000,
-    ('rtdetr',  'valorant'):  0.8755,
-    ('rtdetr',  'overwatch'): 0.3152,
-    ('nanodet', 'cs2'):       0.9824,
-    ('nanodet', 'cf'):        0.9900,
-    ('nanodet', 'valorant'):  0.7509,
-    ('nanodet', 'overwatch'): 0.2138,
-}
-RECALL_BEFORE = BASELINE_RECALL.get((MODEL, GAME), None)
+# DSR and FPS only — no Recall/GT required
 
 ATTACK_DIR       = os.path.join('result', 'evaluation', GAME, MODEL, 'attack')
 ATTACK_CLEAN_DIR = os.path.join('result', 'evaluation', GAME, MODEL, 'attack_clean')
@@ -76,7 +61,6 @@ EVAL_PNG  = os.path.join('result', 'evaluation_summary.png')
 print(f"\n{'='*55}")
 print(f"  Game  : {GAME}  |  Model : {MODEL}")
 print(f"  Data  : {DATA_PATH}")
-print(f"  GT    : {GT_PATH}")
 print(f"  Noise : {NOISE_PATH}")
 print(f"{'='*55}\n")
 
@@ -87,54 +71,7 @@ noise_model_size = torch.load(NOISE_PATH).to(DEVICE)
 print(f"  Noise loaded: {noise_model_size.shape}")
 
 
-# ─── GROUND TRUTH LOADER ─────────────────────────────────────
-def load_gt_boxes(label_path, img_w, img_h):
-    if not os.path.exists(label_path):
-        return []
-    boxes = []
-    with open(label_path, 'r') as f:
-        for line in f:
-            parts = line.strip().split()
-            if len(parts) < 5:
-                continue
-            cls = int(parts[0])
-            if cls != 0:
-                continue
-            cx, cy, w, h = float(parts[1]), float(parts[2]), \
-                           float(parts[3]), float(parts[4])
-            x1 = (cx - w / 2) * img_w
-            y1 = (cy - h / 2) * img_h
-            x2 = (cx + w / 2) * img_w
-            y2 = (cy + h / 2) * img_h
-            boxes.append([x1, y1, x2, y2])
-    return boxes
 
-
-# ─── IoU ─────────────────────────────────────────────────────
-def compute_iou(box1, box2):
-    ix1 = max(box1[0], box2[0])
-    iy1 = max(box1[1], box2[1])
-    ix2 = min(box1[2], box2[2])
-    iy2 = min(box1[3], box2[3])
-    inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
-    area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
-    area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
-    union = area1 + area2 - inter
-    return inter / union if union > 0 else 0.0
-
-
-def compute_tp_fn(gt_boxes, pred_boxes, iou_thr=0.5):
-    if len(gt_boxes) == 0:
-        return 0, 0
-    matched = [False] * len(gt_boxes)
-    for pb in pred_boxes:
-        for j, gb in enumerate(gt_boxes):
-            if not matched[j] and compute_iou(pb[:4], gb) >= iou_thr:
-                matched[j] = True
-                break
-    tp = sum(matched)
-    fn = len(gt_boxes) - tp
-    return tp, fn
 
 
 # ─── LOAD DATASET ────────────────────────────────────────────
@@ -171,14 +108,18 @@ def apply_noise_original(img_pil):
 # ─── MODEL LOADERS ───────────────────────────────────────────
 def load_yolov5n():
     sys.path.insert(0, os.path.abspath('.'))
-    from models.common import DetectMultiBackend, AutoShape
-    model = DetectMultiBackend(
+    print("  [YOLOv5n] Loading weights...", flush=True)
+    from models.experimental import attempt_load
+    from models.common import AutoShape
+    model = attempt_load(
         os.path.join('pretrained_models', 'yolov5n.pt'),
-        device=torch.device(DEVICE), fuse=True)
+        device=torch.device(DEVICE))
+    model.float().eval()
     model = AutoShape(model)
+    model.amp     = False   # disable AMP autocast (prevents memory violation on some GPUs)
     model.conf    = args.conf
     model.classes = [0]
-    print("  [YOLOv5n] Loaded.")
+    print("  [YOLOv5n] Loaded.", flush=True)
     return model
 
 
@@ -213,7 +154,8 @@ def detect_yolov5(model, adv_pil, conf_thr=None):
     adv_np     = np.array(adv_pil)
     orig_conf  = model.conf
     model.conf = conf_thr
-    results    = model(adv_np, size=MODEL_INPUT)
+    with torch.no_grad():
+        results = model(adv_np, size=MODEL_INPUT)
     model.conf = orig_conf
     boxes = []
     for *xyxy, conf, cls in results.xyxy[0].cpu().tolist():
@@ -261,11 +203,10 @@ def detect_rtdetr(model, adv_pil, conf_thr=None):
 
 
 # ─── DRAW BOXES ──────────────────────────────────────────────
-def draw_boxes(pil_img, pred_boxes, gt_boxes):
+def draw_boxes(pil_img, pred_boxes):
+    """Draw predicted bounding boxes (red) on cloaked frame."""
     img  = pil_img.copy()
     draw = ImageDraw.Draw(img)
-    for (x1, y1, x2, y2) in gt_boxes:
-        draw.rectangle([x1, y1, x2, y2], outline='green', width=2)
     for (x1, y1, x2, y2, conf) in pred_boxes:
         draw.rectangle([x1, y1, x2, y2], outline='red', width=3)
         draw.text((x1, max(0, y1 - 15)), f'{conf:.2f}', fill='red')
@@ -273,56 +214,61 @@ def draw_boxes(pil_img, pred_boxes, gt_boxes):
 
 
 # ─── SUMMARY SAVE ────────────────────────────────────────────
-def save_summary(game, model_name, dsr, recall, recall_before, avg_ssim, avg_fps, n_images, total_time_s):
-    drop = (recall_before - recall) / recall_before if recall_before and recall_before > 0 else None
+def save_summary(game, model_name, dsr, avg_fps, n_images, total_time_s):
+    import csv as _csv
     row = {
-        'Game':          game.upper(),
-        'Model':         model_name,
-        'Images':        n_images,
-        'DSR':           round(dsr,    4),
-        'Recall_after':  round(recall, 4),
-        'Recall_before': round(recall_before, 4) if recall_before else None,
-        'Recall_drop':   round(drop, 4) if drop is not None else None,
-        'AvgSSIM':       round(avg_ssim, 4),
-        'AvgFPS':        round(avg_fps,  2),
-        'TotalTime_s':   round(total_time_s, 2),
+        'Game':        game.upper(),
+        'Model':       model_name,
+        'Images':      n_images,
+        'DSR':         round(dsr,     4),
+        'AvgFPS':      round(avg_fps, 2),
+        'TotalTime_s': round(total_time_s, 2),
     }
-    if os.path.exists(EVAL_XLSX):
-        df = pd.read_excel(EVAL_XLSX)
-        df = df[~((df['Game'] == row['Game']) & (df['Model'] == row['Model']))]
-    else:
-        df = pd.DataFrame()
-    df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-    df.to_excel(EVAL_XLSX, index=False)
-    print(f"  Summary → {EVAL_XLSX}")
 
-    if len(df) >= 1:
-        labels  = [f"{r['Game']}\n{r['Model']}" for _, r in df.iterrows()]
-        dsrs    = [v * 100 for v in df['DSR'].tolist()]
-        recalls = [v * 100 for v in df['Recall_drop'].tolist()]
-        x = np.arange(len(labels))
-        w = 0.35
-        fig, ax = plt.subplots(figsize=(max(10, len(df) * 1.2), 5))
-        b1 = ax.bar(x - w / 2, dsrs,    w, label='DSR (%)',        color='steelblue')
-        b2 = ax.bar(x + w / 2, recalls, w, label='Recall Drop (%)', color='tomato')
-        for bar, val in zip(b1, dsrs):
+    summary_csv = EVAL_XLSX.replace('.xlsx', '.csv')
+    fieldnames  = ['Game', 'Model', 'Images', 'DSR', 'AvgFPS', 'TotalTime_s']
+
+    # Read existing rows (csv), drop matching game+model
+    rows = []
+    if os.path.exists(summary_csv):
+        try:
+            with open(summary_csv, 'r', newline='') as f:
+                for r in _csv.DictReader(f):
+                    if not (r.get('Game') == row['Game'] and r.get('Model') == row['Model']):
+                        rows.append(r)
+        except Exception:
+            rows = []
+    rows.append(row)
+
+    # Write back
+    try:
+        with open(summary_csv, 'w', newline='') as f:
+            writer = _csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+        print(f"  Summary → {summary_csv}", flush=True)
+    except Exception as e:
+        print(f"  [warn] could not save summary: {e}", flush=True)
+
+    # Chart
+    try:
+        labels = [f"{r['Game']}\n{r['Model']}" for r in rows]
+        dsrs   = [float(r['DSR']) * 100 for r in rows]
+        fig, ax = plt.subplots(figsize=(max(8, len(rows) * 1.2), 5))
+        bars = ax.bar(labels, dsrs, color='steelblue', width=0.5)
+        for bar, val in zip(bars, dsrs):
             ax.text(bar.get_x() + bar.get_width() / 2,
                     bar.get_height() + 1, f'{val:.1f}%',
-                    ha='center', va='bottom', fontsize=8)
-        for bar, val in zip(b2, recalls):
-            ax.text(bar.get_x() + bar.get_width() / 2,
-                    bar.get_height() + 1, f'{val:.1f}%',
-                    ha='center', va='bottom', fontsize=8)
-        ax.set_xticks(x)
-        ax.set_xticklabels(labels)
-        ax.set_ylabel('Percentage (%)')
-        ax.set_ylim(0, 120)
-        ax.set_title('Universal Cloak — DSR & Recall Drop Rate per Game x Model')
-        ax.legend()
+                    ha='center', va='bottom', fontsize=9)
+        ax.set_ylabel('DSR (%)')
+        ax.set_ylim(0, 115)
+        ax.set_title('AimGuard — Defense Success Rate per Game x Model')
         plt.tight_layout()
         plt.savefig(EVAL_PNG, dpi=150)
         plt.close()
-        print(f"  Chart  → {EVAL_PNG}")
+        print(f"  Chart  → {EVAL_PNG}", flush=True)
+    except Exception as e:
+        print(f"  [warn] could not save chart: {e}", flush=True)
 
 
 # ─── MAIN ────────────────────────────────────────────────────
@@ -342,21 +288,14 @@ def main():
     print(f"\n[3] Evaluating {len(img_paths)} images ...")
     succ_num   = 0
     total_time = 0.0
-    ssim_vals  = []
     log_rows   = []
-    total_tp   = 0
-    total_fn   = 0
 
     for i, img_path in enumerate(img_paths):
         img_pil        = Image.open(img_path).convert('RGB')
         orig_w, orig_h = img_pil.size
-
-        fname    = os.path.splitext(os.path.basename(img_path))[0]
-        gt_label = os.path.join(GT_PATH, fname + '.txt')
-        gt_boxes = load_gt_boxes(gt_label, orig_w, orig_h)
+        fname          = os.path.splitext(os.path.basename(img_path))[0]
 
         t_start = time.time()
-
         adv_pil, adv_t, img_t = apply_noise_original(img_pil)
 
         if MODEL == 'yolov5n':
@@ -366,82 +305,77 @@ def main():
         elif MODEL == 'rtdetr':
             pred_boxes = detect_rtdetr(detect_model, adv_pil, args.conf)
 
-        if MODEL == 'yolov5n':
-            pred_boxes_recall = detect_yolov5(detect_model, adv_pil, args.conf_recall)
-        elif MODEL == 'nanodet':
-            pred_boxes_recall = detect_nanodet(detect_model, nano_cfg, nano_pipeline, adv_pil, args.conf_recall)
-        elif MODEL == 'rtdetr':
-            pred_boxes_recall = detect_rtdetr(detect_model, adv_pil, args.conf_recall)
-
         t_elapsed   = time.time() - t_start
         total_time += t_elapsed
 
         target_succ = 1 if len(pred_boxes) == 0 else 0
         succ_num   += target_succ
 
-        tp, fn = compute_tp_fn(gt_boxes, pred_boxes_recall, args.iou_thr)
-        total_tp += tp
-        total_fn += fn
-
-        ssim_val = ssim_fn(
-            (img_t * 255).cpu(), (adv_t * 255).cpu(),
-            data_range=255, size_average=False
-        ).item()
-        ssim_vals.append(ssim_val)
-
-        fps       = (i + 1) / total_time
-        dsr_now   = succ_num / (i + 1)
-        recall_now = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0.0
+        fps     = (i + 1) / total_time
+        dsr_now = succ_num / (i + 1)
 
         print(f"  [{i+1:3d}/{len(img_paths)}] "
-              f"GT:{len(gt_boxes)} Pred:{len(pred_boxes)} "
-              f"DSR:{dsr_now:.3f} Recall:{recall_now:.3f} "
-              f"SSIM:{ssim_val:.3f} FPS:{fps:.1f}")
+              f"Pred:{len(pred_boxes)} "
+              f"DSR:{dsr_now:.3f} FPS:{fps:.1f}", flush=True)
 
-        adv_vis = draw_boxes(adv_pil, pred_boxes, gt_boxes)
-        adv_vis.save(os.path.join(ATTACK_DIR, f'{fname}_attack.jpg'))
-        adv_pil.save(os.path.join(ATTACK_CLEAN_DIR, f'{fname}_attack.jpg'))
+        # Save clean (no boxes) and with pred boxes (red) for visualization
+        try:
+            adv_pil.convert('RGB').save(os.path.join(ATTACK_CLEAN_DIR, f'{fname}_attack.jpg'))
+            adv_vis = draw_boxes(adv_pil, pred_boxes)
+            adv_vis.convert('RGB').save(os.path.join(ATTACK_DIR, f'{fname}_attack.jpg'))
+        except Exception as e:
+            print(f"    [warn] could not save visualization for {fname}: {e}", flush=True)
 
         log_rows.append({
             'Index':      i,
             'File':       os.path.basename(img_path),
-            'GT_boxes':   len(gt_boxes),
             'Pred_boxes': len(pred_boxes),
-            'TP':         tp,
-            'FN':         fn,
             'TSucc':      target_succ,
-            'DSR':        round(dsr_now,    4),
-            'Recall':     round(recall_now, 4),
-            'SSIM':       round(ssim_val,   4),
-            'Time_s':     round(t_elapsed,  4),
-            'FPS':        round(fps,        2),
+            'DSR':        round(dsr_now,   4),
+            'Time_s':     round(t_elapsed, 4),
+            'FPS':        round(fps,       2),
         })
 
-    log_path = os.path.join(LOG_DIR, f'{GAME}_{MODEL}_eval.xlsx')
-    pd.DataFrame(log_rows).to_excel(log_path, index=False)
-    print(f"\n  Log → {log_path}")
+        # Free per-iteration GPU tensors
+        del adv_t, img_t
 
-    final_dsr    = succ_num / len(img_paths)
-    final_recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0.0
-    final_ssim   = np.mean(ssim_vals)
-    final_fps    = len(img_paths) / total_time
-    total_min    = total_time / 60
+    print("  [debug] loop finished, starting cleanup...", flush=True)
 
-    print(f"\n{'='*55}")
-    print(f"  RESULTS : {GAME.upper()} / {MODEL}")
-    print(f"  Total runtime : {total_time:.1f}s ({total_min:.1f} min)")
-    print(f"  DSR     : {final_dsr:.4f} ({final_dsr*100:.1f}%)")
-    print(f"  Recall after  : {final_recall:.4f} ({final_recall*100:.1f}%)")
-    if RECALL_BEFORE:
-        drop = (RECALL_BEFORE - final_recall) / RECALL_BEFORE * 100
-        print(f"  Recall before : {RECALL_BEFORE:.4f}")
-        print(f"  Recall drop   : {drop:.1f}%")
-    print(f"  AvgSSIM : {final_ssim:.4f}")
-    print(f"  AvgFPS  : {final_fps:.2f}")
-    print(f"{'='*55}\n")
+    # Free GPU memory before file I/O to prevent crash on some systems
+    try:
+        del detect_model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+    print("  [debug] gpu cleanup done", flush=True)
 
-    save_summary(GAME, MODEL, final_dsr, final_recall, RECALL_BEFORE,
-                 final_ssim, final_fps, len(img_paths), total_time)
+    print("  [debug] saving log with csv module...", flush=True)
+    log_path = os.path.join(LOG_DIR, f'{GAME}_{MODEL}_eval.csv')
+    try:
+        import csv as _csv
+        if log_rows:
+            with open(log_path, 'w', newline='') as f:
+                writer = _csv.DictWriter(f, fieldnames=list(log_rows[0].keys()))
+                writer.writeheader()
+                writer.writerows(log_rows)
+        print(f"\n  Log → {log_path}", flush=True)
+    except Exception as e:
+        print(f"  [warn] could not save log: {e}", flush=True)
+
+    final_dsr = succ_num / len(img_paths)
+    final_fps = len(img_paths) / total_time
+    total_min = total_time / 60
+
+    print(f"\n{'='*55}", flush=True)
+    print(f"  RESULTS : {GAME.upper()} / {MODEL}", flush=True)
+    print(f"  Total runtime : {total_time:.1f}s ({total_min:.1f} min)", flush=True)
+    print(f"  DSR     : {final_dsr:.4f} ({final_dsr*100:.1f}%)", flush=True)
+    print(f"  AvgFPS  : {final_fps:.2f}", flush=True)
+    print(f"{'='*55}\n", flush=True)
+
+    save_summary(GAME, MODEL, final_dsr, final_fps, len(img_paths), total_time)
+    print("  Summary saved. Done.", flush=True)
 
 
 if __name__ == '__main__':

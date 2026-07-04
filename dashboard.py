@@ -262,11 +262,12 @@ if st.session_state.page == 'train':
 
                     cmd = [
                         sys.executable, "train_cloak.py",
-                        "--game",    game.strip().lower().replace(" ", "_"),
-                        "--model",   model_name,
-                        "--n_iter",  str(n_iter),
-                        "--lr",      str(lr),
-                        "--epsilon", str(epsilon),
+                        "--game",        game.strip().lower().replace(" ", "_"),
+                        "--model",       model_name,
+                        "--n_iter",      str(n_iter),
+                        "--lr",          str(lr),
+                        "--epsilon",     str(epsilon),
+                        "--data_path",   data_path,
                     ]
 
                     with st.spinner(f"Training {model_name} ..."):
@@ -275,7 +276,7 @@ if st.session_state.page == 'train':
                             stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT,
                             text=True,
-                            cwd=os.path.dirname(__file__)
+                            cwd=os.path.abspath(os.path.dirname(__file__)) or os.getcwd()
                         )
                         log_output = []
                         log_box    = st.expander("Training log", expanded=True)
@@ -298,16 +299,19 @@ if st.session_state.page == 'train':
                                     pass
 
                         process.wait()
-                        if process.returncode == 0:
+                        noise_path = os.path.join(
+                            "universal_cloak", game, model_name, "universal_noise.pt")
+                        # Success if noise file was created (returncode may be nonzero
+                        # from harmless matplotlib/backend warnings)
+                        if os.path.exists(noise_path):
                             progress_bar.progress(1.0)
                             status_text.text("Complete!")
-                            noise_path = os.path.join(
-                                "universal_cloak", game, model_name, "universal_noise.pt")
-                            if os.path.exists(noise_path):
-                                st.success(f"✓ Noise saved → {noise_path}")
-                                st.session_state.training_done = True
+                            st.success(f"✓ Noise saved → {noise_path}")
+                            st.session_state.training_done = True
+                            st.session_state.last_game  = game.strip().lower().replace(" ", "_")
+                            st.session_state.last_model = model_name
                         else:
-                            st.error(f"Training failed for {model_name}")
+                            st.error(f"Training failed for {model_name} (exit code {process.returncode})")
 
         # Show existing noise files
         st.markdown("#### Trained noise files")
@@ -337,11 +341,11 @@ elif st.session_state.page == 'eval':
                 unsafe_allow_html=True)
 
     # Summary metrics — always show cards, 0 if no data
-    eval_xlsx  = os.path.join("result", "evaluation_summary.xlsx")
+    eval_csv   = os.path.join("result", "evaluation_summary.csv")
     df_summary = None
     latest     = None
-    if os.path.exists(eval_xlsx):
-        df_summary = pd.read_excel(eval_xlsx)
+    if os.path.exists(eval_csv):
+        df_summary = pd.read_csv(eval_csv)
         if len(df_summary) > 0:
             latest = df_summary.iloc[-1]
 
@@ -395,11 +399,15 @@ elif st.session_state.page == 'eval':
         with ec1:
             eval_game = st.text_input(
                 "Game name",
-                value="cs2",
+                value=st.session_state.get('last_game', 'cs2'),
                 key="eval_game",
                 placeholder="e.g. cs2, valorant, your_game_name"
             )
-            eval_model = st.selectbox("Model", ["yolov5n", "nanodet", "rtdetr"],
+            _model_list  = ["yolov5n", "nanodet", "rtdetr"]
+            _model_default = st.session_state.get('last_model', 'yolov5n')
+            _model_idx   = _model_list.index(_model_default) if _model_default in _model_list else 0
+            eval_model = st.selectbox("Model", _model_list,
+                                      index=_model_idx,
                                       key="eval_model",
                                       format_func=lambda x: {
                                           "yolov5n": "YOLOv5n",
@@ -432,35 +440,45 @@ elif st.session_state.page == 'eval':
                     "--conf",    str(eval_conf),
                     "--epsilon", str(eval_epsilon),
                 ]
+                # use uploaded frames if available
+                _upload_dir = os.path.join("data", "uploaded_frames")
+                if os.path.exists(_upload_dir) and os.listdir(_upload_dir):
+                    cmd += ["--data_path", _upload_dir]
             with st.spinner("Evaluating ..."):
+                _env = dict(os.environ, PYTHONWARNINGS="ignore", PYTHONUNBUFFERED="1")
                 process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
-                    cwd=os.path.dirname(__file__)
+                    bufsize=1,
+                    env=_env,
+                    cwd=os.path.abspath(os.path.dirname(__file__)) or os.getcwd()
                 )
-                log_box = st.expander("Evaluation log", expanded=True)
+                _eval_log = []
+                _log_area = st.empty()
                 for line in process.stdout:
-                    with log_box:
-                        st.text(line.rstrip())
+                    _eval_log.append(line.rstrip())
+                    # show only last 15 lines, update in place
+                    _log_area.text("\n".join(_eval_log[-15:]))
                 process.wait()
-                if process.returncode == 0:
+                _summary = os.path.join("result", "evaluation_summary.csv")
+                if os.path.exists(_summary):
                     st.success("✓ Evaluation complete!")
                     st.session_state.eval_done = True
                     st.rerun()
                 else:
-                    st.error("Evaluation failed.")
+                    st.error(f"Evaluation failed (exit code {process.returncode}).")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
     # Show per-image log if exists
     log_path = os.path.join("result", "log", eval_game,
-                            f"{eval_game}_{eval_model}_eval.xlsx") \
+                            f"{eval_game}_{eval_model}_eval.csv") \
         if 'eval_game' in dir() else None
     if log_path and os.path.exists(log_path):
         st.markdown("#### Per-frame log")
-        df_log = pd.read_excel(log_path)
+        df_log = pd.read_csv(log_path)
         st.dataframe(df_log.tail(20), use_container_width=True)
 
         chart_path = os.path.join("result", "evaluation_summary.png")

@@ -1,4 +1,7 @@
 import os, sys, time, argparse
+import warnings
+warnings.filterwarnings("ignore")
+os.environ["PYTHONWARNINGS"] = "ignore"
 import numpy as np
 import torch
 import torch.nn as nn
@@ -12,6 +15,11 @@ from dotenv import load_dotenv
 
 # ─── LOAD ENV ─────────────────────────────────────────────────
 load_dotenv()
+
+# Ensure project root is in sys.path so models/utils/export can be imported
+_ROOT = os.path.abspath(os.path.dirname(__file__))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 NANODET_ROOT   = os.environ.get('NANODET_ROOT',   os.path.join(os.path.dirname(__file__), 'third_party', 'nanodet'))
 RTDETR_WEIGHTS = os.environ.get('RTDETR_WEIGHTS', os.path.join('pretrained_models', 'rtdetr-l.pt'))
 DATASET_ROOT   = os.environ.get('DATASET_ROOT',   os.path.join(os.path.dirname(__file__), 'data'))
@@ -19,7 +27,9 @@ DATASET_ROOT   = os.environ.get('DATASET_ROOT',   os.path.join(os.path.dirname(_
 # ─── ARGUMENTS ───────────────────────────────────────────────
 parser = argparse.ArgumentParser()
 parser.add_argument('--game',       required=True,  type=str,
-                    choices=['cs2', 'cf', 'valorant', 'overwatch'])
+                    help='Game name (any name is accepted)')
+parser.add_argument('--data_path',  default=None,   type=str,
+                    help='Direct path to dataset folder (overrides DATASET_ROOT)')
 parser.add_argument('--model',      required=True,  type=str,
                     choices=['yolov5n', 'nanodet', 'rtdetr'])
 parser.add_argument('--n_iter',     default=100,    type=int)
@@ -31,13 +41,12 @@ parser.add_argument('--ssim_w',     default=0.3,    type=float,
                     help='Weight of SSIM loss (default: 0.3)')
 args = parser.parse_args()
 
-DEVICE = f'cuda:{args.gpu}'
+DEVICE = args.gpu if args.gpu == 'cpu' else f'cuda:{args.gpu}'
 EPS    = args.epsilon / 255.0
 GAME   = args.game
 MODEL  = args.model
 
-GAME_FOLDER = {'cs2': 'CS2', 'cf': 'CF', 'valorant': 'Valorant', 'overwatch': 'Overwatch'}
-DATA_PATH   = os.path.join(DATASET_ROOT, GAME_FOLDER[GAME])
+DATA_PATH   = args.data_path if args.data_path else os.path.join(DATASET_ROOT, GAME)
 
 MODEL_SIZE  = {'yolov5n': 416, 'nanodet': 320, 'rtdetr': 640}
 MODEL_INPUT = MODEL_SIZE[MODEL]
@@ -91,12 +100,13 @@ def noise_to_original(noise_model, orig_h, orig_w):
 # ─── MODEL LOADERS ───────────────────────────────────────────
 def load_yolov5n():
     sys.path.insert(0, os.path.abspath('.'))
-    from models.common import DetectMultiBackend
-    model = DetectMultiBackend(
+    print("  [YOLOv5n] Loading weights...", flush=True)
+    from models.experimental import attempt_load
+    model = attempt_load(
         os.path.join('pretrained_models', 'yolov5n.pt'),
-        device=torch.device(DEVICE), fuse=True)
-    model.eval()
-    print("  [YOLOv5n] Loaded.")
+        device=torch.device(DEVICE))
+    model.float().eval()
+    print("  [YOLOv5n] Loaded.", flush=True)
     return model
 
 
