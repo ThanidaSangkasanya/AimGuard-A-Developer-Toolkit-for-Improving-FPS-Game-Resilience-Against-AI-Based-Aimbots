@@ -276,6 +276,8 @@ if st.session_state.page == 'train':
                             stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT,
                             text=True,
+                            encoding="utf-8",
+                            errors="replace",
                             cwd=os.path.abspath(os.path.dirname(__file__)) or os.getcwd()
                         )
                         log_output = []
@@ -451,6 +453,8 @@ elif st.session_state.page == 'eval':
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     bufsize=1,
                     env=_env,
                     cwd=os.path.abspath(os.path.dirname(__file__)) or os.getcwd()

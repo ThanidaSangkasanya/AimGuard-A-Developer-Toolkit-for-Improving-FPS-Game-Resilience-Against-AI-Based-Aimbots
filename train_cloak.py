@@ -2,6 +2,13 @@ import os, sys, time, argparse
 import warnings
 warnings.filterwarnings("ignore")
 os.environ["PYTHONWARNINGS"] = "ignore"
+
+# Force UTF-8 output so unicode chars (arrows) don't crash on Windows cp1252
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except Exception:
+    pass
 import numpy as np
 import torch
 import torch.nn as nn
