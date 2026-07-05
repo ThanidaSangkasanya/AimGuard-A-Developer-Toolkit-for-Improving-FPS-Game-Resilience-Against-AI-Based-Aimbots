@@ -108,11 +108,11 @@ def noise_to_original(noise_model, orig_h, orig_w):
 def load_yolov5n():
     sys.path.insert(0, os.path.abspath('.'))
     print("  [YOLOv5n] Loading weights...", flush=True)
-    from models.experimental import attempt_load
-    model = attempt_load(
+    from models.common import DetectMultiBackend
+    model = DetectMultiBackend(
         os.path.join('pretrained_models', 'yolov5n.pt'),
-        device=torch.device(DEVICE))
-    model.float().eval()
+        device=torch.device(DEVICE), fuse=True)
+    model.eval()
     print("  [YOLOv5n] Loaded.", flush=True)
     return model
 
@@ -174,8 +174,15 @@ def loss_rtdetr(model, adv_model):
         person = torch.sigmoid(logits[:, :, 0:1])
         return _bce(person, torch.zeros_like(person))
     raw  = out[0] if isinstance(out, (list, tuple)) else out
-    conf = torch.sigmoid(raw[..., 4:5])
-    return _bce(conf, torch.zeros_like(conf))
+    # RT-DETR output: [batch, num_queries, 6] = [x, y, w, h, class_score, class_id]
+    # class_score (idx 4) is already a probability in [0, 1]; class_id at idx 5.
+    conf     = raw[..., 4:5].clamp(1e-6, 1 - 1e-6)
+    class_id = raw[..., 5:6]
+    # weight person boxes (class 0) more heavily so the attack focuses on them
+    person_mask = (class_id < 0.5).float()          # 1 for person, 0 otherwise
+    weight      = person_mask * 4.0 + 1.0           # person boxes count 5x
+    loss = -(weight * torch.log(1.0 - conf)).sum() / weight.sum()
+    return loss
 
 
 # ─── TRAINING ────────────────────────────────────────────────
@@ -237,9 +244,19 @@ def train_universal_cloak(img_tensors, img_sizes, model, model_type):
             best_loss  = avg
             best_noise = noise.detach().clone()
 
-        if it % 30 == 0 or it == 1:
-            print(f"    [{it:4d}/{args.n_iter}]  bce={avg:.6f}  "
-                  f"best={best_loss:.6f}  t={time.time() - t0:.0f}s")
+        # Progress bar + percentage (printed every iteration)
+        pct      = it / args.n_iter
+        bar_len  = 30
+        filled   = int(bar_len * pct)
+        bar      = '#' * filled + '-' * (bar_len - filled)
+        elapsed  = time.time() - t0
+        eta      = (elapsed / it) * (args.n_iter - it) if it > 0 else 0
+        print(f"\r    [{bar}] {pct*100:5.1f}%  "
+              f"iter {it}/{args.n_iter}  bce={avg:.4f}  best={best_loss:.4f}  "
+              f"elapsed={elapsed:.0f}s  eta={eta:.0f}s",
+              end='', flush=True)
+
+    print()  # newline after progress bar finishes
 
     total_time = time.time() - t0
     print(f"\n  Done — {total_time:.1f}s ({total_time / 60:.1f} min)  best={best_loss:.6f}")

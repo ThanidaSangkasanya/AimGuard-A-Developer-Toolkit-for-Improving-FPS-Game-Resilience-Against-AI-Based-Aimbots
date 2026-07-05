@@ -116,14 +116,12 @@ def apply_noise_original(img_pil):
 def load_yolov5n():
     sys.path.insert(0, os.path.abspath('.'))
     print("  [YOLOv5n] Loading weights...", flush=True)
-    from models.experimental import attempt_load
-    from models.common import AutoShape
-    model = attempt_load(
+    from models.common import DetectMultiBackend, AutoShape
+    model = DetectMultiBackend(
         os.path.join('pretrained_models', 'yolov5n.pt'),
-        device=torch.device(DEVICE))
-    model.float().eval()
+        device=torch.device(DEVICE), fuse=True)
     model = AutoShape(model)
-    model.amp     = False   # disable AMP autocast (prevents memory violation on some GPUs)
+    model.amp     = False
     model.conf    = args.conf
     model.classes = [0]
     print("  [YOLOv5n] Loaded.", flush=True)
