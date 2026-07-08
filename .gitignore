@@ -1,5 +1,59 @@
-venv-aimguard/ 
-__pycache__/ 
-*.pt  .env 
-logs 
-.env 
+# ─── Images & text data (generated frames, labels, previews, results) ───
+*.txt
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.gif
+*.webp
+
+# ─── Exceptions: keep small tracked reference files if needed ───
+# (remove the leading ! lines below if you truly want zero exceptions)
+!requirements.txt
+
+# ─── Python ───
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.Python
+build/
+dist/
+
+# ─── Virtual environments ───
+venv/
+venv-*/
+.venv/
+env/
+ENV/
+
+# ─── Environment / secrets ───
+.env
+.env.*
+
+# ─── Project data & generated outputs (large / regenerable) ───
+data/
+pretrained_models/
+universal_cloak/
+result/
+
+# ─── Model weights ───
+*.pt
+*.pth
+*.onnx
+*.engine
+
+# ─── Jupyter ───
+.ipynb_checkpoints/
+*.ipynb
+
+# ─── OS / editor junk ───
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+
+# ─── Streamlit ───
+.streamlit/

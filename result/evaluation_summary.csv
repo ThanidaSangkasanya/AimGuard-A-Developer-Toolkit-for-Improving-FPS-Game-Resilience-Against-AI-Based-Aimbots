@@ -1,5 +1,4 @@
-Game,Model,Images,DSR,AvgFPS,TotalTime_s
-CS2,yolov5n,200,0.78,24.99,8.0
-CS2,nanodet,200,0.415,12.79,15.64
-CS2,rtdetr,200,0.0,8.43,23.72
-TEST,rtdetr,200,0.0,8.63,23.17
+Game,Model,Images,DSR,Recall_Before,Recall_After,Recall_Drop,Precision_After,GT_Images
+CS2,yolov5n,200,0.76,0.9075,0.2115,0.696,1.0,199
+CS2,nanodet,200,0.495,0.9119,0.4317,0.4802,0.9703,199
+CS2,rtdetr,200,0.005,0.9868,0.9736,0.0132,0.9736,199

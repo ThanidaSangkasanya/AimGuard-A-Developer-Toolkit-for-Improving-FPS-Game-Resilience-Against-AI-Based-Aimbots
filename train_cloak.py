@@ -252,14 +252,14 @@ def train_universal_cloak(img_tensors, img_sizes, model, model_type):
         elapsed  = time.time() - t0
         eta      = (elapsed / it) * (args.n_iter - it) if it > 0 else 0
         print(f"\r    [{bar}] {pct*100:5.1f}%  "
-              f"iter {it}/{args.n_iter}  bce={avg:.4f}  best={best_loss:.4f}  "
-              f"elapsed={elapsed:.0f}s  eta={eta:.0f}s",
+              f"Epoch {it}/{args.n_iter}  Loss={avg:.4f}  Best Loss={best_loss:.4f}  "
+              f"Total Time={elapsed:.0f}s  Time Remaining={eta:.0f}s",
               end='', flush=True)
 
     print()  # newline after progress bar finishes
 
     total_time = time.time() - t0
-    print(f"\n  Done — {total_time:.1f}s ({total_time / 60:.1f} min)  best={best_loss:.6f}")
+    print(f"\n  Done — Total Time={total_time:.1f}s ({total_time / 60:.1f} min)  Best Loss={best_loss:.6f}")
     return best_noise.cpu(), total_time, losses
 
 
@@ -322,8 +322,8 @@ def main():
     loss_png = os.path.join(NOISE_OUT_DIR, 'loss_curve.png')
     plt.figure(figsize=(8, 4))
     plt.plot(range(1, len(loss_curve) + 1), loss_curve, color='crimson')
-    plt.xlabel('Iteration')
-    plt.ylabel('BCE Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss (BCE)')
     plt.title(f'Loss Curve — {GAME.upper()} / {MODEL}')
     plt.tight_layout()
     plt.savefig(loss_png, dpi=150)
@@ -335,7 +335,7 @@ def main():
 
     print(f"\n{'='*55}")
     print(f"  COMPLETE : {GAME.upper()} / {MODEL}")
-    print(f"  Time     : {total_time:.1f}s  ({total_time / 60:.1f} min)")
+    print(f"  Total Time : {total_time:.1f}s  ({total_time / 60:.1f} min)")
     print(f"{'='*55}\n")
 
 
