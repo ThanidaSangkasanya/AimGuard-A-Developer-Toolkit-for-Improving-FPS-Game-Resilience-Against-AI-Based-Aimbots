@@ -28,7 +28,6 @@ _ROOT = os.path.abspath(os.path.dirname(__file__))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 NANODET_ROOT   = os.environ.get('NANODET_ROOT',   os.path.join(os.path.dirname(__file__), 'third_party', 'nanodet'))
-RTDETR_WEIGHTS = os.environ.get('RTDETR_WEIGHTS', os.path.join('pretrained_models', 'rtdetr-l.pt'))
 DATASET_ROOT   = os.environ.get('DATASET_ROOT',   os.path.join(os.path.dirname(__file__), 'data'))
 
 # ─── ARGUMENTS ───────────────────────────────────────────────
@@ -38,7 +37,7 @@ parser.add_argument('--game',       required=True,  type=str,
 parser.add_argument('--data_path',  default=None,   type=str,
                     help='Direct path to dataset folder (overrides DATASET_ROOT)')
 parser.add_argument('--model',      required=True,  type=str,
-                    choices=['yolov5n', 'nanodet', 'rtdetr'])
+                    choices=['yolov5n', 'nanodet'])
 parser.add_argument('--n_iter',     default=100,    type=int)
 parser.add_argument('--lr',         default=0.0005, type=float)
 parser.add_argument('--epsilon',    default=8,      type=int)
@@ -55,7 +54,7 @@ MODEL  = args.model
 
 DATA_PATH   = args.data_path if args.data_path else os.path.join(DATASET_ROOT, GAME)
 
-MODEL_SIZE  = {'yolov5n': 416, 'nanodet': 320, 'rtdetr': 640}
+MODEL_SIZE  = {'yolov5n': 416, 'nanodet': 320}
 MODEL_INPUT = MODEL_SIZE[MODEL]
 
 NOISE_OUT_DIR   = os.path.join('universal_cloak', GAME, MODEL)
@@ -92,36 +91,7 @@ def load_images_original(folder):
     return tensors, sizes
 
 
-def letterbox_tensor(tensor, new_size, color=114/255, stride=32):
-    """
-    Replicates Ultralytics' LetterBox preprocessing exactly: scales the image
-    to fit within (new_size, new_size) while preserving aspect ratio, then
-    pads the remaining space with grey (114/255) split evenly on both sides.
-    This must match what model.predict() does internally at eval time, or
-    a universal noise trained on plain squish-resized frames will not align
-    with the letterboxed frames used at inference (this was confirmed to be
-    the cause of RT-DETR's near-zero DSR despite loss dropping in training).
-
-    tensor: (3, H, W) float tensor in [0, 1]
-    Returns: (padded (3,new_size,new_size), scale r, (pad_left, pad_top))
-    """
-    c, h, w = tensor.shape
-    r = min(new_size / h, new_size / w)
-    new_unpad_w, new_unpad_h = int(round(w * r)), int(round(h * r))
-    resized = F.interpolate(tensor.unsqueeze(0), size=(new_unpad_h, new_unpad_w),
-                            mode='bilinear', align_corners=False)[0]
-    dw, dh = new_size - new_unpad_w, new_size - new_unpad_h
-    dw, dh = dw / 2, dh / 2
-    left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
-    top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
-    padded = F.pad(resized, (left, right, top, bottom), value=color)
-    return padded, r, (left, top)
-
-
 def to_model_input(tensor, model_input_size):
-    if MODEL == 'rtdetr':
-        padded, _, _ = letterbox_tensor(tensor, model_input_size)
-        return padded.unsqueeze(0)
     img = tensor.unsqueeze(0)
     return F.interpolate(img, size=(model_input_size, model_input_size),
                          mode='bilinear', align_corners=False)
@@ -161,21 +131,6 @@ def load_nanodet():
     return model, cfg
 
 
-def load_rtdetr():
-    from ultralytics import YOLO
-    yolo  = YOLO(RTDETR_WEIGHTS)
-    model = yolo.model.to(DEVICE).eval()
-    # IMPORTANT: model.predict() always runs the model in eval() mode and reads
-    # out[0] (shape (1, num_queries<=300, 6) = [x,y,w,h, conf, class_id]) — this
-    # is confirmed directly from Ultralytics' RTDETRPredictor.postprocess():
-    #   preds = preds[0]; bboxes, scores, labels = preds.split((4, 1, 1), dim=-1)
-    # An earlier attempt switched to model.train() to target a deep-supervision
-    # tensor (out[1]) that doesn't exist under eval() and isn't what .predict()
-    # actually reads — that was a dead end. Training must match eval() exactly.
-    print("  [RT-DETR] Loaded (eval mode, matching model.predict() exactly).")
-    return model
-
-
 # ─── LOSS FUNCTIONS ──────────────────────────────────────────
 _bce = nn.BCELoss()
 
@@ -194,74 +149,26 @@ def loss_nanodet(model, adv_model):
     feats    = model.backbone(img_norm)
     feats    = model.fpn(feats)
     preds    = model.head(feats)
-    total    = torch.tensor(0.0, device=DEVICE)
+
+    # NanoDet-Plus's head returns predictions already concatenated across all
+    # FPN levels into one (batch, num_priors, num_classes + 4*(reg_max+1))
+    # tensor — confirmed via debug_nanodet_confidence.py: "Number of FPN
+    # levels returned by head: 1", shape (num_priors, 112) for a single image,
+    # with confidence at the actual detected person (~0.83 max) drowned out
+    # by ~2000+ background priors averaging ~0.02. Averaging BCE over all of
+    # them dilutes the signal, same problem RT-DETR had with its 300 queries.
+    # Target the max-confidence prior per image instead of the mean.
+    total = torch.tensor(0.0, device=DEVICE)
     for p in preds:
         if isinstance(p, (list, tuple)):
             p = p[0]
-        prob  = torch.sigmoid(p[..., 0:1])
-        total = total + _bce(prob, torch.zeros_like(prob))
+        prob = torch.sigmoid(p[..., 0:1]).squeeze(-1)   # (..., num_priors)
+        if prob.dim() == 1:
+            prob = prob.unsqueeze(0)                      # ensure a batch dim: (1, num_priors)
+        top_prob, _ = prob.max(dim=-1)                    # (batch,) — the prior actually firing
+        top_prob = top_prob.clamp(1e-6, 1 - 1e-6)
+        total = total + _bce(top_prob, torch.zeros_like(top_prob))
     return total
-
-
-def loss_rtdetr(model, adv_model):
-    out = model(adv_model)
-    if isinstance(out, dict) and 'pred_logits' in out:
-        logits = out['pred_logits']
-        person = torch.sigmoid(logits[:, :, 0:1])
-        return _bce(person, torch.zeros_like(person))
-
-    # model.eval() forward (see load_rtdetr) returns out[0] with shape
-    # (batch, k<=300, 6) = [x, y, w, h, conf, class_id] — conf is already the
-    # sigmoid'd, top-1-across-classes score, post top-k selection. This is
-    # confirmed (via Ultralytics source, models/rtdetr/predict.py) to be the
-    # EXACT tensor RTDETRPredictor.postprocess() reads as `preds[0]` to build
-    # the confidence values that model.predict() reports — so gradients here
-    # map directly onto real inference-time behavior, unlike deep-supervision
-    # or auxiliary decoder tensors from other forward paths.
-    #
-    # Only a few of the k rows actually correspond to "person" (class 0); the
-    # rest are top-scoring boxes of other classes. Averaging over all of them
-    # dilutes the signal, so instead we take the single highest-confidence
-    # person row per image (the one actually driving a real detection) and
-    # push just that one toward 0.
-    preds = out[0] if isinstance(out, (list, tuple)) else out
-    if isinstance(preds, torch.Tensor) and preds.dim() == 3 and preds.shape[-1] == 6:
-        conf        = preds[..., 4]                          # (batch, k) already sigmoid'd
-        class_id    = preds[..., 5]                           # (batch, k)
-        person_mask = (class_id < 0.5).float()                # rows whose top class is person
-        person_conf = conf * person_mask                      # non-person rows zeroed out
-        top_person_conf, _ = person_conf.max(dim=-1)           # (batch,) worst-case person conf per image
-        top_person_conf    = top_person_conf.clamp(1e-6, 1 - 1e-6)
-        return _bce(top_person_conf, torch.zeros_like(top_person_conf))
-
-    # Fallback: deep-supervision-style stacked tensor (only exists in train() mode)
-    if isinstance(out, (list, tuple)) and len(out) > 1 and isinstance(out[1], torch.Tensor) \
-            and out[1].dim() == 4:
-        class_logits = out[1]                                # (num_layers, batch, num_queries, num_classes)
-        person_logit = class_logits[..., 0]                    # class 0 = person -> (num_layers, batch, num_queries)
-        person_prob  = torch.sigmoid(person_logit)
-        top_prob, _  = person_prob.max(dim=-1)                 # (num_layers, batch)
-        top_prob     = top_prob.clamp(1e-6, 1 - 1e-6)
-        return _bce(top_prob, torch.zeros_like(top_prob))
-
-    # Fallback: eval-mode-style nested tuple (out[1][3] = last-layer-only logits)
-    if isinstance(out, (list, tuple)) and len(out) > 1 and isinstance(out[1], (list, tuple)) \
-            and len(out[1]) > 3 and isinstance(out[1][3], torch.Tensor):
-        class_logits = out[1][3]
-        person_logit = class_logits[..., 0]
-        person_prob  = torch.sigmoid(person_logit)
-        top_prob, _  = person_prob.max(dim=-1)
-        top_prob     = top_prob.clamp(1e-6, 1 - 1e-6)
-        return _bce(top_prob, torch.zeros_like(top_prob))
-
-    # Last-resort fallback (older/newer ultralytics versions, different signature)
-    raw  = out[0] if isinstance(out, (list, tuple)) else out
-    conf     = raw[..., 4:5].clamp(1e-6, 1 - 1e-6)
-    class_id = raw[..., 5:6]
-    person_mask = (class_id < 0.5).float()
-    weight      = person_mask * 4.0 + 1.0
-    loss = -(weight * torch.log(1.0 - conf)).sum() / weight.sum()
-    return loss
 
 
 # ─── TRAINING ────────────────────────────────────────────────
@@ -298,8 +205,6 @@ def train_universal_cloak(img_tensors, img_sizes, model, model_type):
                 det_loss = loss_yolov5(model, adv)
             elif model_type == 'nanodet':
                 det_loss = loss_nanodet(model, adv)
-            elif model_type == 'rtdetr':
-                det_loss = loss_rtdetr(model, adv)
 
             ssim_val  = ssim_fn((batch * 255).detach().cpu(),
                                 (adv * 255).detach().cpu(),
@@ -386,8 +291,6 @@ def main():
         model = load_yolov5n()
     elif MODEL == 'nanodet':
         model, nano_cfg = load_nanodet()
-    elif MODEL == 'rtdetr':
-        model = load_rtdetr()
 
     print("\n[3] Training ...")
     best_noise, total_time, loss_curve = train_universal_cloak(

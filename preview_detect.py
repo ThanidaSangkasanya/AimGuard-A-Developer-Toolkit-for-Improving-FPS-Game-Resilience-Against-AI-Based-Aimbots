@@ -16,7 +16,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 NANODET_ROOT = os.environ.get('NANODET_ROOT', os.path.join(os.path.dirname(__file__), 'third_party', 'nanodet'))
-RTDETR_WEIGHTS = os.environ.get('RTDETR_WEIGHTS', os.path.join('pretrained_models', 'rtdetr-l.pt'))
 
 # ─── ARGUMENTS ───────────────────────────────────────────────
 parser = argparse.ArgumentParser(
@@ -25,21 +24,21 @@ parser = argparse.ArgumentParser(
 )
 parser.add_argument('--image',             required=True, type=str)
 parser.add_argument('--model',             required=True, type=str,
-                    choices=['yolov5n', 'nanodet', 'rtdetr', 'custom'])
+                    choices=['yolov5n', 'nanodet', 'custom'])
 parser.add_argument('--custom_model_path', default=None,  type=str,
                     help='Required when --model custom is used. Must be a YOLO-compatible '
                          '(Ultralytics YOLOv5/YOLOv8 style) .pt weight file.')
 parser.add_argument('--conf',              default=0.4,   type=float)
 parser.add_argument('--input_size',        default=None,  type=int,
                     help='Detection input resolution. Defaults per model: '
-                         'yolov5n/custom=416, nanodet=320, rtdetr=640')
+                         'yolov5n/custom=416, nanodet=320')
 parser.add_argument('--out_dir',           default=os.path.join('result', 'preview'), type=str)
 parser.add_argument('--gpu',               default='0',   type=str)
 args = parser.parse_args()
 
 DEVICE = args.gpu if args.gpu == 'cpu' else f'cuda:{args.gpu}'
 
-DEFAULT_SIZE = {'yolov5n': 416, 'nanodet': 320, 'rtdetr': 640, 'custom': 416}
+DEFAULT_SIZE = {'yolov5n': 416, 'nanodet': 320, 'custom': 416}
 MODEL_INPUT  = args.input_size if args.input_size else DEFAULT_SIZE[args.model]
 
 os.makedirs(args.out_dir, exist_ok=True)
@@ -90,11 +89,6 @@ def load_nanodet():
     return model, cfg, pipeline
 
 
-def load_rtdetr():
-    from ultralytics import YOLO
-    return YOLO(RTDETR_WEIGHTS)
-
-
 # ─── DETECTION ───────────────────────────────────────────────
 def detect_yolov5(model, img_pil, conf_thr):
     img_np    = np.array(img_pil)
@@ -132,16 +126,6 @@ def detect_nanodet(model, nano_cfg, pipeline, img_pil, conf_thr):
     return boxes
 
 
-def detect_rtdetr(model, img_pil, conf_thr):
-    img_np  = np.array(img_pil)
-    results = model.predict(source=img_np, conf=conf_thr, classes=[0], verbose=False)
-    boxes = []
-    for box in results[0].boxes:
-        x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].tolist()]
-        boxes.append([x1, y1, x2, y2, float(box.conf[0])])
-    return boxes
-
-
 # ─── DRAW BOXES ──────────────────────────────────────────────
 def draw_boxes(pil_img, pred_boxes, label="Human"):
     img  = pil_img.copy()
@@ -169,16 +153,12 @@ def main():
         model = load_custom(args.custom_model_path)
     elif args.model == 'nanodet':
         model, nano_cfg, nano_pipeline = load_nanodet()
-    elif args.model == 'rtdetr':
-        model = load_rtdetr()
 
     print(f"[2] Running detection on raw (uncloaked) frame: {args.image}")
     if args.model in ('yolov5n', 'custom'):
         pred_boxes = detect_yolov5(model, img_pil, args.conf)
     elif args.model == 'nanodet':
         pred_boxes = detect_nanodet(model, nano_cfg, nano_pipeline, img_pil, args.conf)
-    elif args.model == 'rtdetr':
-        pred_boxes = detect_rtdetr(model, img_pil, args.conf)
 
     vis = draw_boxes(img_pil, pred_boxes)
     out_path = os.path.join(args.out_dir, f'{fname}_aimbot_view.jpg')

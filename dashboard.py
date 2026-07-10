@@ -154,17 +154,17 @@ with st.sidebar:
                 padding:0 4px 8px'>TOOLKIT</div>
     """, unsafe_allow_html=True)
 
-    if st.button("⚙️  Train noise",  use_container_width=True,
+    if st.button("🛡️  AimGuard Defense",  width='stretch',
                  type="primary" if st.session_state.page == 'train' else "secondary"):
         st.session_state.page = 'train'
         st.rerun()
 
-    if st.button("📊  Evaluate",     use_container_width=True,
+    if st.button("📊  Evaluate AimGuard",     width='stretch',
                  type="primary" if st.session_state.page == 'eval' else "secondary"):
         st.session_state.page = 'eval'
         st.rerun()
 
-    if st.button("🔗  Integrate",    use_container_width=True,
+    if st.button("🔗  Integrate",    width='stretch',
                  type="primary" if st.session_state.page == 'integrate' else "secondary"):
         st.session_state.page = 'integrate'
         st.rerun()
@@ -187,12 +187,22 @@ with st.sidebar:
 
 
 # ════════════════════════════════════════════════════════════
-# PAGE: TRAIN NOISE
+# PAGE: AIMGUARD DEFENSE (train the protective noise pattern)
 # ════════════════════════════════════════════════════════════
 if st.session_state.page == 'train':
-    st.markdown("<div class='page-title'>Train noise</div>", unsafe_allow_html=True)
-    st.markdown("<div class='page-sub'>Generate a Universal Noise pattern from game dataset</div>",
-                unsafe_allow_html=True)
+    st.markdown("<div class='page-title'>AimGuard Defense</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='page-sub'>Generate the AimGuard defense pattern for your game</div>",
+        unsafe_allow_html=True
+    )
+    st.markdown(
+        "<div class='gt-hint' style='margin-bottom:20px'>💡 <b>What is \"noise\" here?</b> It's an invisible layer of "
+        "pixel-level static overlaid on the game image — imperceptible to players, but it "
+        "confuses an aimbot's detection model so it can't recognize player characters. "
+        "This page generates that pattern (saved as a <code>universal_noise.pt</code> file) "
+        "from your uploaded game frames.</div>",
+        unsafe_allow_html=True
+    )
 
     # ── Dataset card (full width) ──────────────────────────
     with st.container(border=True):
@@ -311,7 +321,7 @@ if st.session_state.page == 'train':
             st.markdown("#### ⚙️ Configuration")
         with head_r:
             st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-            if st.button("➕ Add model", key="toggle_add_model", use_container_width=True):
+            if st.button("➕ Add model", key="toggle_add_model", width='stretch'):
                 st.session_state.show_add_model = not st.session_state.show_add_model
 
         # ── Optional: add a custom detection model (top-right toggle) ──
@@ -321,18 +331,16 @@ if st.session_state.page == 'train':
                 with cm_l:
                     st.markdown("**➕ Add a custom detection model**")
                 with cm_r:
-                    if st.button("✕ Close", key="close_add_model", use_container_width=True):
+                    if st.button("✕ Close", key="close_add_model", width='stretch'):
                         st.session_state.show_add_model = False
                         st.rerun()
 
                 st.markdown(
                     "You can add your own cheating/detection model to train against, in addition "
-                    "to the **3 built-in demo models** below (YOLOv5n, NanoDet-Plus, RT-DETR), "
+                    "to the **2 built-in demo models** below (YOLOv5n, NanoDet-Plus), "
                     "which represent common real-world visual-aimbot architectures.\n\n"
-                    "**Supported formats:** PyTorch `.pt` weights only, compatible with the "
-                    "**YOLO family** (Ultralytics-style YOLOv5 / YOLOv8 export). Other "
-                    "architectures (e.g. NanoDet, RT-DETR, Detectron2, TensorFlow, ONNX) are "
-                    "not supported for custom upload — use one of the 3 built-in demo models instead."
+                    "**Supported model format:** PyTorch `.pt` weights (Ultralytics YOLO models, "
+                    "e.g., YOLOv5 and YOLOv8)."
                 )
 
                 custom_model_file = st.file_uploader(
@@ -365,11 +373,10 @@ if st.session_state.page == 'train':
 
         col_a, col_b = st.columns(2)
         with col_a:
-            model_options = ["yolov5n", "nanodet", "rtdetr"]
+            model_options = ["yolov5n", "nanodet"]
             model_labels  = {
                 "yolov5n": "YOLOv5n (demo)",
-                "nanodet": "NanoDet-Plus (demo)",
-                "rtdetr":  "RT-DETR ⚠️ slow (demo)"
+                "nanodet": "NanoDet-Plus (demo)"
             }
             if st.session_state.custom_model_path and os.path.exists(st.session_state.custom_model_path):
                 model_options.append("custom")
@@ -379,7 +386,7 @@ if st.session_state.page == 'train':
                 "Aimbot model (1 noise file per model)",
                 model_options,
                 format_func=lambda x: model_labels[x],
-                help="Each model generates one separate noise file. The 3 built-in models "
+                help="Each model generates one separate noise file. The 2 built-in models "
                      "are demo/reference cheating architectures; the custom option (if "
                      "added via 'Add model' above) trains against your own YOLO-compatible weights."
             )
@@ -439,11 +446,10 @@ if st.session_state.page == 'train':
                     key="aimbot_preview_image"
                 )
             with pv_c2:
-                preview_model_options = ["yolov5n", "nanodet", "rtdetr"]
+                preview_model_options = ["yolov5n", "nanodet"]
                 preview_model_labels  = {
                     "yolov5n": "YOLOv5n",
-                    "nanodet": "NanoDet-Plus",
-                    "rtdetr":  "RT-DETR"
+                    "nanodet": "NanoDet-Plus"
                 }
                 if st.session_state.custom_model_path and os.path.exists(st.session_state.custom_model_path):
                     preview_model_options.append("custom")
@@ -458,7 +464,7 @@ if st.session_state.page == 'train':
             preview_conf = st.slider("Detection confidence threshold", 0.1, 0.9, 0.4, 0.05,
                                      key="aimbot_preview_conf")
 
-            if st.button("▶️ Run Aimbot Preview", use_container_width=True):
+            if st.button("▶️ Run Aimbot Preview", width='stretch'):
                 img_path = os.path.join(preview_upload_dir, preview_image_name)
                 out_dir  = os.path.join("result", "preview")
                 os.makedirs(out_dir, exist_ok=True)
@@ -487,10 +493,10 @@ if st.session_state.page == 'train':
                     pv_res1, pv_res2 = st.columns(2)
                     with pv_res1:
                         st.markdown("**Original frame**")
-                        st.image(img_path, use_container_width=True)
+                        st.image(img_path, width='stretch')
                     with pv_res2:
                         st.markdown("**Before Invisibility Cloak — aimbot sees this**")
-                        st.image(out_img, use_container_width=True)
+                        st.image(out_img, width='stretch')
                     st.caption(proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else "")
                 else:
                     st.error("Preview failed to generate an output image.")
@@ -504,12 +510,6 @@ if st.session_state.page == 'train':
         "Each model produces **1 separate noise file** "
         f"→ `universal_cloak/{game.strip() or 'game'}/{proxy_model}/universal_noise.pt`"
     )
-    if proxy_model == "rtdetr":
-        st.warning(
-            "⚠️ **RT-DETR selected** — this model uses a Transformer architecture "
-            "which requires significantly more memory and compute time than YOLOv5n or NanoDet-Plus. "
-            "Training may take several times longer. Ensure you have a capable GPU before proceeding."
-        )
 
     st.markdown("---")
 
@@ -518,7 +518,7 @@ if st.session_state.page == 'train':
     else:
         st.info(f"Ready to train **{proxy_model}** | epsilon={epsilon}/255 | ssim_w={ssim_w} | epochs={n_iter} | game={game}")
 
-        if st.button("🚀 Start Training", use_container_width=True, type="primary"):
+        if st.button("🚀 Start Training", width='stretch', type="primary"):
             if not data_path or not os.path.exists(data_path):
                 st.error("No frames found. Please upload game frames above.")
             else:
@@ -595,7 +595,7 @@ if st.session_state.page == 'train':
                     found.append({"Model": model_dir, "File": pt_path,
                                   "Size": f"{size_mb:.2f} MB"})
             if found:
-                st.dataframe(pd.DataFrame(found), use_container_width=True)
+                st.dataframe(pd.DataFrame(found), width='stretch')
             else:
                 st.info("No trained noise files yet for this game.")
         else:
@@ -606,18 +606,37 @@ if st.session_state.page == 'train':
 # PAGE: EVALUATE
 # ════════════════════════════════════════════════════════════
 elif st.session_state.page == 'eval':
-    st.markdown("<div class='page-title'>Evaluate</div>", unsafe_allow_html=True)
-    st.markdown("<div class='page-sub'>Test how well the noise protects against aimbots</div>",
+    st.markdown("<div class='page-title'>Evaluate AimGuard</div>", unsafe_allow_html=True)
+    st.markdown("<div class='page-sub'>Test how well the defense pattern protects against aimbots</div>",
                 unsafe_allow_html=True)
 
     st.markdown(
-        "<div class='gt-hint'>Datasets and labels uploaded on the <b>Train noise</b> page are "
+        "<div class='gt-hint'>Datasets and labels uploaded on the <b>AimGuard Defense</b> page are "
         "saved per game name and reused here automatically — no re-upload needed. Don't have "
         "ground-truth labels yet? "
         "<a href='https://www.makesense.ai/' target='_blank'>Click here</a> to annotate frames.</div>",
         unsafe_allow_html=True
     )
     st.markdown("")
+
+    # ── Detect any results that failed to save due to a locked/open CSV ──
+    import glob as _glob
+    _unsaved_files = sorted(_glob.glob(os.path.join("result", "evaluation_summary_UNSAVED_*.csv")))
+    if _unsaved_files:
+        st.error(
+            f"⚠️ **{len(_unsaved_files)} evaluation run(s) could not be saved to "
+            f"`result/evaluation_summary.csv`** — it was likely open in Excel or another "
+            f"program at the time. **The chart and cards below may be showing stale results "
+            f"from an older run.** Close the file, then check the runs below."
+        )
+        with st.expander(f"Show the {len(_unsaved_files)} unsaved run(s)", expanded=True):
+            for _f in _unsaved_files:
+                st.caption(_f)
+                st.dataframe(pd.read_csv(_f), width='stretch')
+            if st.button("🗑️ Delete these unsaved-run files", key="clear_unsaved"):
+                for _f in _unsaved_files:
+                    os.remove(_f)
+                st.rerun()
 
     # Summary metrics — always show cards, 0 if no data
     eval_csv   = os.path.join("result", "evaluation_summary.csv")
@@ -687,7 +706,7 @@ elif st.session_state.page == 'eval':
                 st.markdown(f"**{label}**")
                 st.progress(dsr, text=f"{dsr*100:.1f}%")
         else:
-            for arch in ["YOLOv5n", "NanoDet-Plus", "RT-DETR"]:
+            for arch in ["YOLOv5n", "NanoDet-Plus"]:
                 st.markdown(f"**{arch}**")
                 st.progress(0.0, text="0.0%")
 
@@ -702,11 +721,10 @@ elif st.session_state.page == 'eval':
                 key="eval_game",
                 placeholder="e.g. cs2, valorant, your_game_name"
             )
-            _model_list   = ["yolov5n", "nanodet", "rtdetr"]
+            _model_list   = ["yolov5n", "nanodet"]
             _model_labels = {
                 "yolov5n": "YOLOv5n",
-                "nanodet": "NanoDet-Plus",
-                "rtdetr":  "RT-DETR"
+                "nanodet": "NanoDet-Plus"
             }
             if st.session_state.custom_model_path and os.path.exists(st.session_state.custom_model_path):
                 _model_list.append("custom")
@@ -724,7 +742,7 @@ elif st.session_state.page == 'eval':
                                             format_func=lambda x: f"{x}/255",
                                             key="eval_eps")
 
-        # ── Auto-detect the same per-game frames/labels saved on Train noise ──
+        # ── Auto-detect the same per-game frames/labels saved on AimGuard Defense ──
         eval_game_safe  = sanitize_game_name(eval_game)
         eval_frames_dir = os.path.join("data", eval_game_safe, "frames")
         eval_labels_dir = os.path.join("data", eval_game_safe, "labels")
@@ -738,7 +756,7 @@ elif st.session_state.page == 'eval':
                       f"{eval_frame_count} frame(s) from `{eval_frames_dir}` (no re-upload needed)")
         else:
             st.warning(f"⚠️ No saved frames found for '{eval_game.strip() or eval_game_safe}'. "
-                      f"Go to **Train noise** and upload frames under this game name first.")
+                      f"Go to **AimGuard Defense** and upload frames under this game name first.")
 
         eval_labels_exist = os.path.exists(eval_labels_dir) and os.listdir(eval_labels_dir)
 
@@ -772,13 +790,13 @@ elif st.session_state.page == 'eval':
         if os.path.exists(noise_path):
             st.success(f"✓ Noise file found: {noise_path}")
         else:
-            st.warning(f"⚠️ Noise not found: {noise_path} — run Train noise first")
+            st.warning(f"⚠️ Noise not found: {noise_path} — run AimGuard Defense first")
 
-        if st.button("▶️ Run Evaluation", use_container_width=True, type="primary"):
+        if st.button("▶️ Run Evaluation", width='stretch', type="primary"):
             if not os.path.exists(noise_path):
                 st.error("Noise file not found. Train first.")
             elif eval_frame_count == 0:
-                st.error("No frames found for this game. Upload frames on the Train noise page first.")
+                st.error("No frames found for this game. Upload frames on the AimGuard Defense page first.")
             else:
                 cmd = [
                     sys.executable, "get_cloak.py",
@@ -790,7 +808,7 @@ elif st.session_state.page == 'eval':
                 ]
                 if eval_model == "custom" and st.session_state.custom_model_path:
                     cmd += ["--custom_model_path", st.session_state.custom_model_path]
-                # reuse the same per-game frames folder saved on Train noise
+                # reuse the same per-game frames folder saved on AimGuard Defense
                 if eval_frame_count > 0:
                     cmd += ["--data_path", eval_frames_dir]
                 # pass ground-truth label path if the user opted in
@@ -810,12 +828,19 @@ elif st.session_state.page == 'eval':
                     env=_env,
                     cwd=os.path.abspath(os.path.dirname(__file__)) or os.getcwd()
                 )
+                import html as _html
                 _eval_log = []
                 _log_area = st.empty()
                 for line in process.stdout:
                     _eval_log.append(line.rstrip())
-                    # show only last 15 lines, update in place
-                    _log_area.text("\n".join(_eval_log[-15:]))
+                    _log_text = _html.escape("\n".join(_eval_log))
+                    _log_area.markdown(
+                        f"<div style='height:320px; overflow-y:auto; background:#0f172a; "
+                        f"color:#e2e8f0; font-family:monospace; font-size:12px; padding:10px; "
+                        f"border-radius:8px; white-space:pre-wrap; word-break:break-all;'>"
+                        f"{_log_text}</div>",
+                        unsafe_allow_html=True
+                    )
                 process.wait()
                 _summary = os.path.join("result", "evaluation_summary.csv")
                 if os.path.exists(_summary):
@@ -834,12 +859,12 @@ elif st.session_state.page == 'eval':
     if log_path and os.path.exists(log_path):
         st.markdown("#### Per-frame log")
         df_log = pd.read_csv(log_path)
-        st.dataframe(df_log.tail(20), use_container_width=True)
+        st.dataframe(df_log.tail(20), width='stretch')
 
         chart_path = os.path.join("result", "evaluation_summary.png")
         if os.path.exists(chart_path):
             st.markdown("#### DSR & Recall Before/After Chart")
-            st.image(chart_path, use_column_width=True)
+            st.image(chart_path, width='stretch')
 
     # ── Optional: Before / After image comparison gallery ──
     if 'eval_game' in dir() and 'eval_model' in dir():
@@ -885,13 +910,13 @@ elif st.session_state.page == 'eval':
                     with img_c1:
                         st.markdown("**Before — raw frame (aimbot's original view)**")
                         if os.path.exists(before_path):
-                            st.image(before_path, use_container_width=True)
+                            st.image(before_path, width='stretch')
                         else:
                             st.info("Image not found — rerun evaluation with the gallery option enabled.")
                     with img_c2:
                         st.markdown("**After — with Invisibility Cloak**")
                         if os.path.exists(after_path):
-                            st.image(after_path, use_container_width=True)
+                            st.image(after_path, width='stretch')
                         else:
                             st.info("Image not found — rerun evaluation with the gallery option enabled.")
                 else:
@@ -929,7 +954,7 @@ elif st.session_state.page == 'integrate':
         for nf in noise_files:
             st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;`{nf}`")
     else:
-        st.markdown("🔴 **No noise files** — run Train noise first")
+        st.markdown("🔴 **No defense patterns yet** — run AimGuard Defense first")
 
     train_status = "🟡 Training in progress" \
         if st.session_state.training_done else "⚪ No active training"
@@ -966,17 +991,4 @@ protected = engine.generate_noise(frame)
 | Unreal Engine | Custom PostProcess Material or SceneCapture |
 | Cloud Gaming server | Server-side before video encoding |
 """)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    # Download noise file
-    if noise_files:
-        st.markdown("#### 📥 Download noise file")
-        selected = st.selectbox("Select noise file", noise_files)
-        with open(selected, "rb") as f:
-            st.download_button(
-                label="⬇️ Download .pt file",
-                data=f,
-                file_name=os.path.basename(selected),
-                mime="application/octet-stream"
-            )
     st.markdown("</div>", unsafe_allow_html=True)

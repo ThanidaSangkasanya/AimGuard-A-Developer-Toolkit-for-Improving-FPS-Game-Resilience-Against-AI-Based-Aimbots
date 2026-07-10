@@ -22,7 +22,6 @@ from dotenv import load_dotenv
 # ─── LOAD ENV ─────────────────────────────────────────────────
 load_dotenv()
 NANODET_ROOT   = os.environ.get('NANODET_ROOT',   os.path.join(os.path.dirname(__file__), 'third_party', 'nanodet'))
-RTDETR_WEIGHTS = os.environ.get('RTDETR_WEIGHTS', os.path.join('pretrained_models', 'rtdetr-l.pt'))
 DATASET_ROOT   = os.environ.get('DATASET_ROOT',   os.path.join(os.path.dirname(__file__), 'data'))
 
 
@@ -33,7 +32,7 @@ parser.add_argument('--game',         required=True, type=str,
 parser.add_argument('--data_path',    default=None,  type=str,
                     help='Direct path to dataset folder (overrides DATASET_ROOT)')
 parser.add_argument('--model',        required=True, type=str,
-                    choices=['yolov5n', 'nanodet', 'rtdetr', 'custom'])
+                    choices=['yolov5n', 'nanodet', 'custom'])
 parser.add_argument('--custom_model_path', default=None, type=str,
                     help='Required when --model custom is used. Must be a YOLO-compatible '
                          '(Ultralytics YOLOv5/YOLOv8 style) .pt weight file.')
@@ -60,7 +59,7 @@ EPS    = args.epsilon / 255.0
 GAME   = args.game
 MODEL  = args.model
 
-MODEL_SIZE  = {'yolov5n': 416, 'nanodet': 320, 'rtdetr': 640, 'custom': 416}
+MODEL_SIZE  = {'yolov5n': 416, 'nanodet': 320, 'custom': 416}
 MODEL_INPUT = MODEL_SIZE[MODEL]
 
 DATA_PATH  = args.data_path if args.data_path else os.path.join(DATASET_ROOT, GAME)
@@ -201,47 +200,17 @@ def match_boxes(pred_boxes, gt_boxes, iou_thr):
 
 
 # ─── APPLY NOISE ─────────────────────────────────────────────
-def unletterbox_noise(noise_model_frame, orig_h, orig_w, stride=32):
-    """
-    Inverse of the letterbox transform used during training for RT-DETR:
-    crops out the grey padding region the noise was trained against, then
-    rescales the remaining "active" region back up to the original image's
-    resolution. This keeps the noise spatially aligned with what
-    model.predict() will see after it letterboxes the noised original image
-    again internally at inference time.
-    """
-    new_size = noise_model_frame.shape[-1]  # square model input, e.g. 640
-    r = min(new_size / orig_h, new_size / orig_w)
-    new_unpad_w, new_unpad_h = int(round(orig_w * r)), int(round(orig_h * r))
-    dw, dh = new_size - new_unpad_w, new_size - new_unpad_h
-    dw, dh = dw / 2, dh / 2
-    left, top = int(round(dw - 0.1)), int(round(dh - 0.1))
-
-    cropped = noise_model_frame[:, top:top + new_unpad_h, left:left + new_unpad_w]
-    noise_orig = F.interpolate(
-        cropped.unsqueeze(0), size=(orig_h, orig_w),
-        mode='bilinear', align_corners=False
-    ).squeeze(0)
-    return noise_orig
-
-
 def apply_noise_original(img_pil):
     orig_w, orig_h = img_pil.size
     img_t = torch.from_numpy(
         np.array(img_pil).transpose(2, 0, 1)
     ).float().unsqueeze(0).to(DEVICE) / 255.0
 
-    if MODEL == 'rtdetr':
-        # noise_model_size lives in a letterboxed 640x640 frame (matching
-        # how it was trained) — map it back to original-image coordinates
-        # correctly instead of a naive squish-resize.
-        noise_orig = unletterbox_noise(noise_model_size, orig_h, orig_w)
-    else:
-        noise_orig = F.interpolate(
-            noise_model_size.unsqueeze(0),
-            size=(orig_h, orig_w),
-            mode='bilinear', align_corners=False
-        ).squeeze(0)
+    noise_orig = F.interpolate(
+        noise_model_size.unsqueeze(0),
+        size=(orig_h, orig_w),
+        mode='bilinear', align_corners=False
+    ).squeeze(0)
 
     noise_clamped = torch.clamp(noise_orig, -EPS, EPS)
     adv_t  = torch.clamp(img_t + noise_clamped.unsqueeze(0), 0.0, 1.0)
@@ -300,13 +269,6 @@ def load_nanodet():
     return model, cfg, pipeline
 
 
-def load_rtdetr():
-    from ultralytics import YOLO
-    model = YOLO(RTDETR_WEIGHTS)
-    print("  [RT-DETR] Loaded.")
-    return model
-
-
 # ─── DETECTION ───────────────────────────────────────────────
 def detect_yolov5(model, img_pil, conf_thr=None):
     if conf_thr is None:
@@ -349,19 +311,6 @@ def detect_nanodet(model, nano_cfg, pipeline, img_pil, conf_thr=None):
     return boxes
 
 
-def detect_rtdetr(model, img_pil, conf_thr=None):
-    if conf_thr is None:
-        conf_thr = args.conf
-    img_np  = np.array(img_pil)
-    results = model.predict(source=img_np, conf=conf_thr,
-                            classes=[0], verbose=False)
-    boxes = []
-    for box in results[0].boxes:
-        x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].tolist()]
-        boxes.append([x1, y1, x2, y2, float(box.conf[0])])
-    return boxes
-
-
 def run_detection(model_bundle, img_pil, conf_thr=None):
     """Dispatch to the correct detect_* function based on MODEL."""
     if MODEL in ('yolov5n', 'custom'):
@@ -369,8 +318,6 @@ def run_detection(model_bundle, img_pil, conf_thr=None):
     elif MODEL == 'nanodet':
         model, nano_cfg, nano_pipeline = model_bundle
         return detect_nanodet(model, nano_cfg, nano_pipeline, img_pil, conf_thr)
-    elif MODEL == 'rtdetr':
-        return detect_rtdetr(model_bundle, img_pil, conf_thr)
 
 
 # ─── DRAW BOXES ──────────────────────────────────────────────
@@ -524,8 +471,6 @@ def main():
         model_bundle = load_custom()
     elif MODEL == 'nanodet':
         model_bundle = load_nanodet()   # (model, cfg, pipeline)
-    elif MODEL == 'rtdetr':
-        model_bundle = load_rtdetr()
 
     print(f"\n[3] Evaluating {len(img_paths)} images (before vs after cloak) ...")
     succ_num = 0
