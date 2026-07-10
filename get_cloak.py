@@ -96,6 +96,10 @@ if not os.path.exists(NOISE_PATH):
     raise FileNotFoundError(f"Noise not found: {NOISE_PATH}\nRun train_cloak.py first.")
 noise_model_size = torch.load(NOISE_PATH).to(DEVICE)
 print(f"  Noise loaded: {noise_model_size.shape}")
+_noise_hash = hash(noise_model_size.detach().cpu().numpy().tobytes()) & 0xFFFFFFFF
+print(f"  Fingerprint : mean_abs={noise_model_size.abs().mean().item():.6f}  "
+     f"std={noise_model_size.std().item():.6f}  hash={_noise_hash:08x}  "
+     f"(mtime={time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(os.path.getmtime(NOISE_PATH)))})")
 
 
 # ─── LOAD DATASET ────────────────────────────────────────────
@@ -197,17 +201,47 @@ def match_boxes(pred_boxes, gt_boxes, iou_thr):
 
 
 # ─── APPLY NOISE ─────────────────────────────────────────────
+def unletterbox_noise(noise_model_frame, orig_h, orig_w, stride=32):
+    """
+    Inverse of the letterbox transform used during training for RT-DETR:
+    crops out the grey padding region the noise was trained against, then
+    rescales the remaining "active" region back up to the original image's
+    resolution. This keeps the noise spatially aligned with what
+    model.predict() will see after it letterboxes the noised original image
+    again internally at inference time.
+    """
+    new_size = noise_model_frame.shape[-1]  # square model input, e.g. 640
+    r = min(new_size / orig_h, new_size / orig_w)
+    new_unpad_w, new_unpad_h = int(round(orig_w * r)), int(round(orig_h * r))
+    dw, dh = new_size - new_unpad_w, new_size - new_unpad_h
+    dw, dh = dw / 2, dh / 2
+    left, top = int(round(dw - 0.1)), int(round(dh - 0.1))
+
+    cropped = noise_model_frame[:, top:top + new_unpad_h, left:left + new_unpad_w]
+    noise_orig = F.interpolate(
+        cropped.unsqueeze(0), size=(orig_h, orig_w),
+        mode='bilinear', align_corners=False
+    ).squeeze(0)
+    return noise_orig
+
+
 def apply_noise_original(img_pil):
     orig_w, orig_h = img_pil.size
     img_t = torch.from_numpy(
         np.array(img_pil).transpose(2, 0, 1)
     ).float().unsqueeze(0).to(DEVICE) / 255.0
 
-    noise_orig = F.interpolate(
-        noise_model_size.unsqueeze(0),
-        size=(orig_h, orig_w),
-        mode='bilinear', align_corners=False
-    ).squeeze(0)
+    if MODEL == 'rtdetr':
+        # noise_model_size lives in a letterboxed 640x640 frame (matching
+        # how it was trained) — map it back to original-image coordinates
+        # correctly instead of a naive squish-resize.
+        noise_orig = unletterbox_noise(noise_model_size, orig_h, orig_w)
+    else:
+        noise_orig = F.interpolate(
+            noise_model_size.unsqueeze(0),
+            size=(orig_h, orig_w),
+            mode='bilinear', align_corners=False
+        ).squeeze(0)
 
     noise_clamped = torch.clamp(noise_orig, -EPS, EPS)
     adv_t  = torch.clamp(img_t + noise_clamped.unsqueeze(0), 0.0, 1.0)
@@ -398,6 +432,30 @@ def save_summary(game, model_name, dsr, n_images,
             writer.writeheader()
             writer.writerows(rows)
         print(f"  Summary → {summary_csv}", flush=True)
+    except PermissionError as e:
+        # File is very likely open in Excel or another program and locked for
+        # writing. Falling back silently would mean the dashboard keeps
+        # showing STALE results from a previous run without anyone noticing —
+        # so instead we write to a clearly-named fallback file AND print a
+        # loud, impossible-to-miss warning.
+        import time as _time
+        fallback = summary_csv.replace('.csv', f'_UNSAVED_{int(_time.time())}.csv')
+        try:
+            with open(fallback, 'w', newline='') as f:
+                writer = _csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(rows)
+        except Exception:
+            fallback = None
+        print(f"\n{'!'*70}", flush=True)
+        print(f"  ⚠️  COULD NOT SAVE {summary_csv} — PERMISSION DENIED", flush=True)
+        print(f"  ⚠️  The file is likely open in Excel or another program.", flush=True)
+        print(f"  ⚠️  THE DASHBOARD IS STILL SHOWING OLD/STALE RESULTS FROM", flush=True)
+        print(f"  ⚠️  A PREVIOUS RUN — THIS RUN'S NUMBERS WERE NOT SAVED THERE.", flush=True)
+        if fallback:
+            print(f"  ⚠️  This run's real results were saved to: {fallback}", flush=True)
+        print(f"  ⚠️  Close the file in Excel, then re-run evaluation to fix this.", flush=True)
+        print(f"{'!'*70}\n", flush=True)
     except Exception as e:
         print(f"  [warn] could not save summary: {e}", flush=True)
 

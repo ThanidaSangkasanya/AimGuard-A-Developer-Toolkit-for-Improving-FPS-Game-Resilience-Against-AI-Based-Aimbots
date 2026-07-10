@@ -92,7 +92,36 @@ def load_images_original(folder):
     return tensors, sizes
 
 
+def letterbox_tensor(tensor, new_size, color=114/255, stride=32):
+    """
+    Replicates Ultralytics' LetterBox preprocessing exactly: scales the image
+    to fit within (new_size, new_size) while preserving aspect ratio, then
+    pads the remaining space with grey (114/255) split evenly on both sides.
+    This must match what model.predict() does internally at eval time, or
+    a universal noise trained on plain squish-resized frames will not align
+    with the letterboxed frames used at inference (this was confirmed to be
+    the cause of RT-DETR's near-zero DSR despite loss dropping in training).
+
+    tensor: (3, H, W) float tensor in [0, 1]
+    Returns: (padded (3,new_size,new_size), scale r, (pad_left, pad_top))
+    """
+    c, h, w = tensor.shape
+    r = min(new_size / h, new_size / w)
+    new_unpad_w, new_unpad_h = int(round(w * r)), int(round(h * r))
+    resized = F.interpolate(tensor.unsqueeze(0), size=(new_unpad_h, new_unpad_w),
+                            mode='bilinear', align_corners=False)[0]
+    dw, dh = new_size - new_unpad_w, new_size - new_unpad_h
+    dw, dh = dw / 2, dh / 2
+    left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
+    top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
+    padded = F.pad(resized, (left, right, top, bottom), value=color)
+    return padded, r, (left, top)
+
+
 def to_model_input(tensor, model_input_size):
+    if MODEL == 'rtdetr':
+        padded, _, _ = letterbox_tensor(tensor, model_input_size)
+        return padded.unsqueeze(0)
     img = tensor.unsqueeze(0)
     return F.interpolate(img, size=(model_input_size, model_input_size),
                          mode='bilinear', align_corners=False)
@@ -136,7 +165,14 @@ def load_rtdetr():
     from ultralytics import YOLO
     yolo  = YOLO(RTDETR_WEIGHTS)
     model = yolo.model.to(DEVICE).eval()
-    print("  [RT-DETR] Loaded.")
+    # IMPORTANT: model.predict() always runs the model in eval() mode and reads
+    # out[0] (shape (1, num_queries<=300, 6) = [x,y,w,h, conf, class_id]) — this
+    # is confirmed directly from Ultralytics' RTDETRPredictor.postprocess():
+    #   preds = preds[0]; bboxes, scores, labels = preds.split((4, 1, 1), dim=-1)
+    # An earlier attempt switched to model.train() to target a deep-supervision
+    # tensor (out[1]) that doesn't exist under eval() and isn't what .predict()
+    # actually reads — that was a dead end. Training must match eval() exactly.
+    print("  [RT-DETR] Loaded (eval mode, matching model.predict() exactly).")
     return model
 
 
@@ -173,14 +209,57 @@ def loss_rtdetr(model, adv_model):
         logits = out['pred_logits']
         person = torch.sigmoid(logits[:, :, 0:1])
         return _bce(person, torch.zeros_like(person))
+
+    # model.eval() forward (see load_rtdetr) returns out[0] with shape
+    # (batch, k<=300, 6) = [x, y, w, h, conf, class_id] — conf is already the
+    # sigmoid'd, top-1-across-classes score, post top-k selection. This is
+    # confirmed (via Ultralytics source, models/rtdetr/predict.py) to be the
+    # EXACT tensor RTDETRPredictor.postprocess() reads as `preds[0]` to build
+    # the confidence values that model.predict() reports — so gradients here
+    # map directly onto real inference-time behavior, unlike deep-supervision
+    # or auxiliary decoder tensors from other forward paths.
+    #
+    # Only a few of the k rows actually correspond to "person" (class 0); the
+    # rest are top-scoring boxes of other classes. Averaging over all of them
+    # dilutes the signal, so instead we take the single highest-confidence
+    # person row per image (the one actually driving a real detection) and
+    # push just that one toward 0.
+    preds = out[0] if isinstance(out, (list, tuple)) else out
+    if isinstance(preds, torch.Tensor) and preds.dim() == 3 and preds.shape[-1] == 6:
+        conf        = preds[..., 4]                          # (batch, k) already sigmoid'd
+        class_id    = preds[..., 5]                           # (batch, k)
+        person_mask = (class_id < 0.5).float()                # rows whose top class is person
+        person_conf = conf * person_mask                      # non-person rows zeroed out
+        top_person_conf, _ = person_conf.max(dim=-1)           # (batch,) worst-case person conf per image
+        top_person_conf    = top_person_conf.clamp(1e-6, 1 - 1e-6)
+        return _bce(top_person_conf, torch.zeros_like(top_person_conf))
+
+    # Fallback: deep-supervision-style stacked tensor (only exists in train() mode)
+    if isinstance(out, (list, tuple)) and len(out) > 1 and isinstance(out[1], torch.Tensor) \
+            and out[1].dim() == 4:
+        class_logits = out[1]                                # (num_layers, batch, num_queries, num_classes)
+        person_logit = class_logits[..., 0]                    # class 0 = person -> (num_layers, batch, num_queries)
+        person_prob  = torch.sigmoid(person_logit)
+        top_prob, _  = person_prob.max(dim=-1)                 # (num_layers, batch)
+        top_prob     = top_prob.clamp(1e-6, 1 - 1e-6)
+        return _bce(top_prob, torch.zeros_like(top_prob))
+
+    # Fallback: eval-mode-style nested tuple (out[1][3] = last-layer-only logits)
+    if isinstance(out, (list, tuple)) and len(out) > 1 and isinstance(out[1], (list, tuple)) \
+            and len(out[1]) > 3 and isinstance(out[1][3], torch.Tensor):
+        class_logits = out[1][3]
+        person_logit = class_logits[..., 0]
+        person_prob  = torch.sigmoid(person_logit)
+        top_prob, _  = person_prob.max(dim=-1)
+        top_prob     = top_prob.clamp(1e-6, 1 - 1e-6)
+        return _bce(top_prob, torch.zeros_like(top_prob))
+
+    # Last-resort fallback (older/newer ultralytics versions, different signature)
     raw  = out[0] if isinstance(out, (list, tuple)) else out
-    # RT-DETR output: [batch, num_queries, 6] = [x, y, w, h, class_score, class_id]
-    # class_score (idx 4) is already a probability in [0, 1]; class_id at idx 5.
     conf     = raw[..., 4:5].clamp(1e-6, 1 - 1e-6)
     class_id = raw[..., 5:6]
-    # weight person boxes (class 0) more heavily so the attack focuses on them
-    person_mask = (class_id < 0.5).float()          # 1 for person, 0 otherwise
-    weight      = person_mask * 4.0 + 1.0           # person boxes count 5x
+    person_mask = (class_id < 0.5).float()
+    weight      = person_mask * 4.0 + 1.0
     loss = -(weight * torch.log(1.0 - conf)).sum() / weight.sum()
     return loss
 
@@ -315,9 +394,12 @@ def main():
         img_tensors, img_sizes, model, MODEL)
 
     torch.save(best_noise, NOISE_SAVE_PATH)
+    _noise_hash = hash(best_noise.numpy().tobytes()) & 0xFFFFFFFF
     print(f"\n[4] Noise saved → {NOISE_SAVE_PATH}")
     print(f"    Shape : {best_noise.shape}  (model input size {MODEL_INPUT}x{MODEL_INPUT})")
     print(f"    Range : [{best_noise.min():.4f}, {best_noise.max():.4f}]")
+    print(f"    Fingerprint : mean_abs={best_noise.abs().mean().item():.6f}  "
+          f"std={best_noise.std().item():.6f}  hash={_noise_hash:08x}")
 
     loss_png = os.path.join(NOISE_OUT_DIR, 'loss_curve.png')
     plt.figure(figsize=(8, 4))
