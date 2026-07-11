@@ -12,8 +12,3 @@ try:
 except Exception as e:
     print(f"NanoDet: FAIL — {e}")
 
-try:
-    from ultralytics import RTDETR
-    print("RT-DETR: OK")
-except Exception as e:
-    print(f"RT-DETR: FAIL — {e}")
