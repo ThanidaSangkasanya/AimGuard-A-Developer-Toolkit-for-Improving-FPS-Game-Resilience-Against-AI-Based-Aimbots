@@ -1,59 +1,54 @@
-# ─── Images & text data (generated frames, labels, previews, results) ───
-*.txt
-*.png
-*.jpg
-*.jpeg
-*.bmp
-*.gif
-*.webp
-
-# ─── Exceptions: keep small tracked reference files if needed ───
-# (remove the leading ! lines below if you truly want zero exceptions)
-!requirements.txt
-
-# ─── Python ───
+# ─── Python ─────────────────────────────────────────────
 __pycache__/
 *.py[cod]
-*$py.class
+*.pyo
 *.egg-info/
-.eggs/
 .Python
 build/
 dist/
 
-# ─── Virtual environments ───
+# ─── Virtual environments ───────────────────────────────
 venv/
-venv-*/
 .venv/
 env/
-ENV/
 
-# ─── Environment / secrets ───
+# ─── Environment / secrets ──────────────────────────────
 .env
 .env.*
 
-# ─── Project data & generated outputs (large / regenerable) ───
-data/
-pretrained_models/
-universal_cloak/
-result/
+# ─── Streamlit ──────────────────────────────────────────
+.streamlit/secrets.toml
 
-# ─── Model weights ───
-*.pt
-*.pth
-*.onnx
-*.engine
-
-# ─── Jupyter ───
-.ipynb_checkpoints/
-*.ipynb
-
-# ─── OS / editor junk ───
+# ─── OS / editor junk ───────────────────────────────────
 .DS_Store
 Thumbs.db
-.idea/
 .vscode/
-*.log
+.idea/
 
-# ─── Streamlit ───
-.streamlit/
+# ─── Logs / caches ───────────────────────────────────────
+*.log
+.cache/
+
+# ─── Result artifacts (regenerated each run, keep out of git) ──
+result/
+
+# ══════════════════════════════════════════════════════════
+# The following are intentionally tracked so the app's
+# uploaded/generated assets can be versioned:
+#   - data/<game>/frames   -> uploaded game screenshots
+#   - data/<game>/labels   -> uploaded ground-truth labels
+#   - universal_noise/     -> trained universal_noise.pt files
+#   - pretrained_models/custom -> uploaded custom .pt models
+# Nothing below this line is ignored.
+# ══════════════════════════════════════════════════════════
+!data/
+!data/**
+!universal_noise/
+!universal_noise/**
+!pretrained_models/
+!pretrained_models/**
+!*.jpg
+!*.jpeg
+!*.png
+!*.bmp
+!*.pt
