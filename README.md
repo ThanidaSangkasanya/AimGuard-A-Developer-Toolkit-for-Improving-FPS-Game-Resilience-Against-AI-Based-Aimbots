@@ -1,9 +1,9 @@
 "# AimGuard-A-Developer-Toolkit-for-Improving-FPS-Game-Resilience-Against-AI-Based-Aimbots" 
 
 License Agreement
-This software is a work developed by (Developer’s name) from
-(School’s name) under the provision of (Advisor’s name under (Project’s
-name), which has been supported by the National Science and Technology
+
+This software is a work developed by Thanida Sangkasanya from
+Prince of Songkla University Phuket Campus under the provision of Asst. Prof. Dr. Norrathep Rattanavipanon under AimGuard: A Developer Toolkit for Improving FPS Game Resilience Against AI-Based Aimbots, which has been supported by the National Science and Technology
 Development Agency (NSTDA), in order to encourage pupils and students to
 learn and practice their skills in developing software. Therefore, the intellectual
 property of this software shall belong to the developer and the developer
