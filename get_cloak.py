@@ -436,7 +436,8 @@ def save_summary(game, model_name, dsr, n_images,
                             bar.get_height() + 1, f'{bar.get_height():.1f}%',
                             ha='center', va='bottom', fontsize=8)
 
-            ax.legend(loc='upper right', fontsize=8)
+            ax.legend(loc='lower center', bbox_to_anchor=(0.5, 1.02),
+                     ncol=3, fontsize=9, frameon=False)
         else:
             width = 0.5
             fig, ax = plt.subplots(figsize=(max(8, len(rows) * 1.2), 5))
@@ -445,12 +446,14 @@ def save_summary(game, model_name, dsr, n_images,
                 ax.text(bar.get_x() + bar.get_width() / 2,
                         bar.get_height() + 1, f'{bar.get_height():.1f}%',
                         ha='center', va='bottom', fontsize=9)
+            ax.legend(loc='lower center', bbox_to_anchor=(0.5, 1.02),
+                     ncol=1, fontsize=9, frameon=False)
 
         ax.set_xticks(x)
         ax.set_xticklabels(labels)
         ax.set_ylabel('Percent (%)')
-        ax.set_ylim(0, 115)
-        ax.set_title('AimGuard — DSR & Recall Before/After Cloak')
+        ax.set_ylim(0, 118)
+        ax.set_title('AimGuard — DSR & Recall Before/After Cloak', pad=32)
         plt.tight_layout()
         plt.savefig(EVAL_PNG, dpi=150)
         plt.close()

@@ -417,13 +417,13 @@ if st.session_state.page == 'train':
                 "If the cloak looks too visible in the preview, raise it back up."
             )
 
-    # ── Aimbot Vision Preview (before Invisibility Cloak) ──
+    # ── Aimbot Vision Preview (before AimGuard) ──
     with st.container(border=True):
         st.markdown("#### 🎯 Aimbot Vision Preview")
         st.markdown(
             "<div class='gt-hint'>See exactly what a visual aimbot detects on your "
-            "<b>raw, unprotected</b> frames — before any Invisibility Cloak noise is applied. "
-            "Useful as a before/after reference once you've trained a cloak.</div>",
+            "<b>raw, unprotected</b> frames — before AimGuard noise is applied. "
+            "Useful as a before/after reference once you've trained a defense pattern.</div>",
             unsafe_allow_html=True
         )
 
@@ -495,7 +495,7 @@ if st.session_state.page == 'train':
                         st.markdown("**Original frame**")
                         st.image(img_path, width='stretch')
                     with pv_res2:
-                        st.markdown("**Before Invisibility Cloak — aimbot sees this**")
+                        st.markdown("**Before AimGuard — aimbot sees this**")
                         st.image(out_img, width='stretch')
                     st.caption(proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else "")
                 else:
@@ -677,13 +677,13 @@ elif st.session_state.page == 'eval':
         c3, c4, c5 = cols[2], cols[3], cols[4]
         with c3:
             st.markdown(f"""<div class='metric-card'>
-                <div class='metric-label'>Recall Before cloak</div>
+                <div class='metric-label'>Recall Aimbot</div>
                 <div class='metric-val' style='color:#B91C1C'>{recall_before_val:.1f}%</div>
                 <div class='metric-sub'>{gt_images_val} labeled frames</div>
             </div>""", unsafe_allow_html=True)
         with c4:
             st.markdown(f"""<div class='metric-card'>
-                <div class='metric-label'>Recall After cloak</div>
+                <div class='metric-label'>Recall Defense</div>
                 <div class='metric-val' style='color:#B45309'>{recall_after_val:.1f}%</div>
                 <div class='metric-sub'>{gt_images_val} labeled frames</div>
             </div>""", unsafe_allow_html=True)
@@ -693,6 +693,16 @@ elif st.session_state.page == 'eval':
                 <div class='metric-val' style='color:#15803D'>{recall_drop_val:.1f} pts</div>
                 <div class='metric-sub'>higher = stronger defense</div>
             </div>""", unsafe_allow_html=True)
+
+    st.markdown(
+        "<div class='gt-hint'>ℹ️ <b>DSR (Defense Success Rate)</b> — the % of frames where "
+        "the aimbot detected <b>zero</b> targets after AimGuard was applied. Higher = more "
+        "frames were fully protected.<br>"
+        "<b>Recall</b> — the % of actual ground-truth players the aimbot successfully detected "
+        "(regardless of whether other detections were wrong).<br>"
+        "<b>Recall Drop</b> = how many percentage points that detection rate fell.</div>",
+        unsafe_allow_html=True
+    )
 
     st.markdown("---")
 
@@ -879,10 +889,9 @@ elif st.session_state.page == 'eval':
             with st.container(border=True):
                 st.markdown("#### 🖼️ Optional: Before / After Comparison")
                 st.markdown(
-                    "<div class='gt-hint'>Compare a frame before and after Invisibility Cloak "
+                    "<div class='gt-hint'>Compare a frame before and after AimGuard "
                     "was applied, with or without bounding boxes, to see how visible the noise "
-                    "is and how much the aimbot's detections change. Red = predicted box, "
-                    "Green = ground truth (only shown when labels were used during evaluation).</div>",
+                    "is and how much the aimbot's detections change.</div>",
                     unsafe_allow_html=True
                 )
 
@@ -914,11 +923,14 @@ elif st.session_state.page == 'eval':
                         else:
                             st.info("Image not found — rerun evaluation with the gallery option enabled.")
                     with img_c2:
-                        st.markdown("**After — with Invisibility Cloak**")
+                        st.markdown("**After — with AimGuard**")
                         if os.path.exists(after_path):
                             st.image(after_path, width='stretch')
                         else:
                             st.info("Image not found — rerun evaluation with the gallery option enabled.")
+                        if show_bbox:
+                            st.caption("🔴 Red = predicted box")
+                            st.caption("🟢 Green = ground truth (only shown when labels were used during evaluation)")
                 else:
                     st.info("No gallery images found for this game/model yet.")
 

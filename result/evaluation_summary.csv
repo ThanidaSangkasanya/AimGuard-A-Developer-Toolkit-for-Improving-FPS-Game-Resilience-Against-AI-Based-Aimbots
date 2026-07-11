@@ -1,2 +1,5 @@
 Game,Model,Images,DSR,Recall_Before,Recall_After,Recall_Drop,Precision_After,GT_Images
-CS2,nanodet,200,0.495,0.9119,0.4317,0.4802,0.9703,199
+CS2,yolov5n,200,0.79,0.9075,0.185,0.7225,1.0,199
+CS2,nanodet,200,0.555,0.9119,0.3877,0.5242,0.9888,199
+CF,yolov5n,200,0.8,0.975,0.2,0.775,1.0,200
+CF,nanodet,200,0.425,0.98,0.575,0.405,1.0,200
