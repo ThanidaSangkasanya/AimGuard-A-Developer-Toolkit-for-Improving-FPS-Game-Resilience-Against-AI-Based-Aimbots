@@ -9,12 +9,15 @@ dist/
 
 # ─── Virtual environments ───────────────────────────────
 venv/
+venv-*/
 .venv/
 env/
+ENV/
 
 # ─── Environment / secrets ──────────────────────────────
 .env
 .env.*
+!.env.example
 
 # ─── Streamlit ──────────────────────────────────────────
 .streamlit/secrets.toml
@@ -29,26 +32,39 @@ Thumbs.db
 *.log
 .cache/
 
-# ─── Result artifacts (regenerated each run, keep out of git) ──
-result/
+# ─── User-uploaded content (NOT tracked) ────────────────
+# Per-game frames & labels uploaded via the dashboard, and any custom
+# model a user uploads locally through "Add model" — none of this
+# belongs in the public repo (privacy, copyright, and repo-size
+# reasons). Provide these separately (e.g. a download link in README).
+data/
+pretrained_models/custom/
 
 # ══════════════════════════════════════════════════════════
-# The following are intentionally tracked so the app's
-# uploaded/generated assets can be versioned:
-#   - data/<game>/frames   -> uploaded game screenshots
-#   - data/<game>/labels   -> uploaded ground-truth labels
-#   - universal_noise/     -> trained universal_noise.pt files
-#   - pretrained_models/custom -> uploaded custom .pt models
-# Nothing below this line is ignored.
+# The following ARE intentionally tracked (bundled with the repo
+# so users can clone-and-run without downloading or training
+# anything extra, and can see example results immediately):
+#   - models/, utils/                     -> YOLOv5 source code
+#   - pretrained_models/yolov5n.pt         -> YOLOv5n demo weight
+#   - nanodet/                             -> NanoDet-Plus source + weight
+#   - universal_cloak/<game>/<model>/      -> pre-trained defense pattern
+#       ├── universal_noise.pt              (ready to evaluate immediately,
+#       └── loss_curve.png                   no training required)
+#   - result/                              -> example evaluation output
+#       ├── evaluation_summary.csv/png       (small, safe to bundle)
+#       ├── log/<game>/*.csv                 (small, safe to bundle)
+#       └── evaluation/<game>/<model>/       (⚠️ up to ~800 images per
+#           before_clean, before_bbox,        game+model combo — this
+#           after_clean, after_bbox/           can get large fast, see
+#                                              note below)
+# These are NOT covered by any ignore rule above, so git tracks
+# them by default — no explicit "!" exception needed.
+#
+# NOTE: only commit the specific game/model combos you actually want
+# to ship (e.g. cs2, cf) — use `git add universal_cloak/cs2 result`
+# rather than a blanket `git add .` if these folders also contain
+# experimental/test runs you don't want published. If repo size
+# becomes a problem, consider trimming result/evaluation/*/*/before_*
+# and after_* down to a handful of sample images per combo instead of
+# keeping all of them.
 # ══════════════════════════════════════════════════════════
-!data/
-!data/**
-!universal_noise/
-!universal_noise/**
-!pretrained_models/
-!pretrained_models/**
-!*.jpg
-!*.jpeg
-!*.png
-!*.bmp
-!*.pt

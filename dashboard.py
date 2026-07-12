@@ -185,6 +185,18 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
+    with st.expander("📜 ข้อตกลงในการใช้ซอฟต์แวร์ (Disclaimer)"):
+        st.markdown(
+            "<div style='font-size:12px; color:#CBD5E1'>"
+            "AimGuard พัฒนาขึ้นเพื่อ<b>วัตถุประสงค์ด้านการวิจัยและการศึกษาเท่านั้น</b> "
+            "ไม่ใช่ผลิตภัณฑ์พร้อมใช้งานจริงเชิงพาณิชย์ จัดทำขึ้น \"ตามสภาพที่เป็นอยู่\" (AS IS) "
+            "โดยไม่มีการรับประกันใดๆ ผู้พัฒนาไม่รับผิดชอบต่อความเสียหายที่เกิดจากการใช้งาน "
+            "<b>ห้ามนำไปดัดแปลงเป็นเครื่องมือโกงเกม</b> การใช้งานซอฟต์แวร์นี้ถือว่ายอมรับข้อตกลง "
+            "ฉบับเต็มใน <code>03_ข้อตกลงการใช้งาน.md</code> แล้ว"
+            "</div>",
+            unsafe_allow_html=True
+        )
+
 
 # ════════════════════════════════════════════════════════════
 # PAGE: AIMGUARD DEFENSE (train the protective noise pattern)
@@ -508,7 +520,7 @@ if st.session_state.page == 'train':
         "ℹ️ **Training time depends on:** number of frames, training epochs, "
         "GPU performance, and selected model.\n\n"
         "Each model produces **1 separate noise file** "
-        f"→ `universal_noise/{game.strip() or 'game'}/{proxy_model}/universal_noise.pt`"
+        f"→ `universal_cloak/{game.strip() or 'game'}/{proxy_model}/universal_noise.pt`"
     )
 
     st.markdown("---")
@@ -528,7 +540,7 @@ if st.session_state.page == 'train':
                     status_text  = st.empty()
 
                     cmd = [
-                        sys.executable, "train_noise.py",
+                        sys.executable, "train_cloak.py",
                         "--game",        game_safe,
                         "--model",       model_name,
                         "--n_iter",      str(n_iter),
@@ -570,7 +582,7 @@ if st.session_state.page == 'train':
 
                         process.wait()
                         noise_path = os.path.join(
-                            "universal_noise", game, model_name, "universal_noise.pt")
+                            "universal_cloak", game, model_name, "universal_noise.pt")
                         # Success if noise file was created (returncode may be nonzero
                         # from harmless matplotlib/backend warnings)
                         if os.path.exists(noise_path):
@@ -585,7 +597,7 @@ if st.session_state.page == 'train':
 
         # Show existing noise files
         st.markdown("#### Trained noise files")
-        noise_dir = os.path.join("universal_noise", game)
+        noise_dir = os.path.join("universal_cloak", game)
         if os.path.exists(noise_dir):
             found = []
             for model_dir in os.listdir(noise_dir):
@@ -778,7 +790,7 @@ elif st.session_state.page == 'eval':
                 use_gt = st.checkbox(
                     f"Use saved ground-truth labels ({len(os.listdir(eval_labels_dir))} files) for this evaluation",
                     value=True,
-                    help="If checked, get_noise.py will be passed --label_path to compute "
+                    help="If checked, get_cloak.py will be passed --label_path to compute "
                          "Recall Before/After/Drop against your ground truth. "
                          "Labels must be YOLO-format .txt files with the same basename as "
                          "the image."
@@ -794,7 +806,7 @@ elif st.session_state.page == 'eval':
                  "so you can visually compare them below after evaluation finishes."
         )
 
-        noise_path = os.path.join("universal_noise",
+        noise_path = os.path.join("universal_cloak",
                                   eval_game_safe,
                                   eval_model, "universal_noise.pt")
         if os.path.exists(noise_path):
@@ -809,7 +821,7 @@ elif st.session_state.page == 'eval':
                 st.error("No frames found for this game. Upload frames on the AimGuard Defense page first.")
             else:
                 cmd = [
-                    sys.executable, "get_noise.py",
+                    sys.executable, "get_cloak.py",
                     "--game",         eval_game_safe,
                     "--model",        eval_model,
                     "--conf",         str(eval_conf),
@@ -954,10 +966,10 @@ elif st.session_state.page == 'integrate':
                 f"{'CUDA ' + torch.version.cuda + ' · ' + gpu_name if gpu_ok else 'Not available'}")
 
     noise_files = []
-    if os.path.exists("universal_noise"):
-        for game_dir in os.listdir("universal_noise"):
-            for model_dir in os.listdir(os.path.join("universal_noise", game_dir)):
-                pt = os.path.join("universal_noise", game_dir, model_dir, "universal_noise.pt")
+    if os.path.exists("universal_cloak"):
+        for game_dir in os.listdir("universal_cloak"):
+            for model_dir in os.listdir(os.path.join("universal_cloak", game_dir)):
+                pt = os.path.join("universal_cloak", game_dir, model_dir, "universal_noise.pt")
                 if os.path.exists(pt):
                     noise_files.append(f"{game_dir}/{model_dir}/universal_noise.pt")
 
@@ -984,7 +996,7 @@ elif st.session_state.page == 'integrate':
     st.code("""# Load the trained noise file
 from aimguard import NoiseEngine
 
-engine    = NoiseEngine("universal_noise/cs2/yolov5n/universal_noise.pt")
+engine    = NoiseEngine("universal_cloak/cs2/yolov5n/universal_noise.pt")
 protected = engine.generate_noise(frame)
 
 # frame    = numpy array (H x W x 3, uint8) from your game renderer
