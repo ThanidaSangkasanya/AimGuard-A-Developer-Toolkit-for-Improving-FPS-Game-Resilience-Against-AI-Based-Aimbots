@@ -29,6 +29,8 @@ python-dotenv>=1.0.0
 omegaconf>=2.0.6
 pycocotools>=2.0.6
 tensorboard>=2.4.1
+termcolor>=1.1.0
+tabulate>=0.8.9
 
 # Logging ---------------------------------------------------------------------
 # clearml>=1.2.0

@@ -37,7 +37,12 @@ Thumbs.db
 # model a user uploads locally through "Add model" — none of this
 # belongs in the public repo (privacy, copyright, and repo-size
 # reasons). Provide these separately (e.g. a download link in README).
-data/
+#
+# NOTE: the leading "/" below is required — a bare "data/" pattern
+# matches a folder named "data" at ANY depth in the repo, which would
+# also incorrectly exclude nanodet/nanodet/data/ (NanoDet's own source
+# code module, not user data) and break the NanoDet install entirely.
+/data/
 pretrained_models/custom/
 
 # ══════════════════════════════════════════════════════════
