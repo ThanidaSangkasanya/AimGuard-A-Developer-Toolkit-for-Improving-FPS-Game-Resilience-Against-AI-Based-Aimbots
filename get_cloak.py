@@ -338,7 +338,8 @@ def draw_boxes(pil_img, pred_boxes, gt_boxes=None):
 # ─── SUMMARY SAVE ────────────────────────────────────────────
 def save_summary(game, model_name, dsr, n_images,
                   recall_before=None, recall_after=None, precision_after=None,
-                  gt_images=0):
+                  gt_images=0, total_before_detect_s=None, total_after_detect_s=None,
+                  total_eval_s=None):
     import csv as _csv
     recall_drop = None
     if recall_before is not None and recall_after is not None:
@@ -354,11 +355,15 @@ def save_summary(game, model_name, dsr, n_images,
         'Recall_Drop':    round(recall_drop, 4)     if recall_drop     is not None else '',
         'Precision_After':round(precision_after, 4) if precision_after is not None else '',
         'GT_Images':      gt_images,
+        'Total_Before_Detect_s': round(total_before_detect_s, 2) if total_before_detect_s is not None else '',
+        'Total_After_Detect_s':  round(total_after_detect_s, 2)  if total_after_detect_s  is not None else '',
+        'Total_Eval_s':          round(total_eval_s, 2)          if total_eval_s          is not None else '',
     }
 
     summary_csv = EVAL_XLSX.replace('.xlsx', '.csv')
     fieldnames  = ['Game', 'Model', 'Images', 'DSR', 'Recall_Before', 'Recall_After',
-                   'Recall_Drop', 'Precision_After', 'GT_Images']
+                   'Recall_Drop', 'Precision_After', 'GT_Images',
+                   'Total_Before_Detect_s', 'Total_After_Detect_s', 'Total_Eval_s']
 
     rows = []
     if os.path.exists(summary_csv):
@@ -478,6 +483,9 @@ def main():
     print(f"\n[3] Evaluating {len(img_paths)} images (before vs after cloak) ...")
     succ_num = 0
     log_rows = []
+    t_eval_start   = time.time()
+    t_before_total = 0.0
+    t_after_total  = 0.0
 
     # Ground-truth accumulators (before = raw frame, after = cloaked frame)
     total_tp_before, total_fp_before, total_fn_before = 0, 0, 0
@@ -490,11 +498,15 @@ def main():
         fname          = os.path.splitext(os.path.basename(img_path))[0]
 
         # ── BEFORE: detection on the raw, unprotected frame ──
+        _t0 = time.time()
         pred_before = run_detection(model_bundle, img_pil, args.conf)
+        t_before_total += time.time() - _t0
 
         # ── AFTER: apply Invisibility Cloak, then detect ─────
         adv_pil, adv_t, img_t = apply_noise_original(img_pil)
+        _t0 = time.time()
         pred_after = run_detection(model_bundle, adv_pil, args.conf)
+        t_after_total += time.time() - _t0
 
         target_succ = 1 if len(pred_after) == 0 else 0
         succ_num   += target_succ
@@ -585,6 +597,9 @@ def main():
     final_recall_drop = (final_recall_before - final_recall_after) \
         if (final_recall_before is not None and final_recall_after is not None) else None
 
+    total_eval_time = time.time() - t_eval_start
+    n_imgs          = len(img_paths)
+
     print(f"\n{'='*55}", flush=True)
     print(f"  RESULTS : {GAME.upper()} / {MODEL}", flush=True)
     print(f"  DSR     : {final_dsr:.4f} ({final_dsr*100:.1f}%)", flush=True)
@@ -596,11 +611,20 @@ def main():
         print(f"  Precision After: {final_precision_after:.4f} ({final_precision_after*100:.1f}%)", flush=True)
     elif USE_GT:
         print(f"  [warn] Ground-truth path given but no matching label files were found.", flush=True)
+    print(f"  ---", flush=True)
+    print(f"  Total Detect Time (before) : {t_before_total:.2f}s  "
+          f"({t_before_total / n_imgs * 1000:.1f} ms/image)", flush=True)
+    print(f"  Total Detect Time (after)  : {t_after_total:.2f}s  "
+          f"({t_after_total / n_imgs * 1000:.1f} ms/image)", flush=True)
+    print(f"  Total Evaluation Time      : {total_eval_time:.2f}s "
+          f"({total_eval_time / 60:.2f} min)", flush=True)
     print(f"{'='*55}\n", flush=True)
 
     save_summary(GAME, MODEL, final_dsr, len(img_paths),
                 recall_before=final_recall_before, recall_after=final_recall_after,
-                precision_after=final_precision_after, gt_images=gt_images_used)
+                precision_after=final_precision_after, gt_images=gt_images_used,
+                total_before_detect_s=t_before_total, total_after_detect_s=t_after_total,
+                total_eval_s=total_eval_time)
     print("  Summary saved. Done.", flush=True)
 
 
