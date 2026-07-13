@@ -185,18 +185,6 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
-    with st.expander("📜 ข้อตกลงในการใช้ซอฟต์แวร์ (Disclaimer)"):
-        st.markdown(
-            "<div style='font-size:12px; color:#CBD5E1'>"
-            "AimGuard พัฒนาขึ้นเพื่อ<b>วัตถุประสงค์ด้านการวิจัยและการศึกษาเท่านั้น</b> "
-            "ไม่ใช่ผลิตภัณฑ์พร้อมใช้งานจริงเชิงพาณิชย์ จัดทำขึ้น \"ตามสภาพที่เป็นอยู่\" (AS IS) "
-            "โดยไม่มีการรับประกันใดๆ ผู้พัฒนาไม่รับผิดชอบต่อความเสียหายที่เกิดจากการใช้งาน "
-            "<b>ห้ามนำไปดัดแปลงเป็นเครื่องมือโกงเกม</b> การใช้งานซอฟต์แวร์นี้ถือว่ายอมรับข้อตกลง "
-            "ฉบับเต็มใน <code>03_ข้อตกลงการใช้งาน.md</code> แล้ว"
-            "</div>",
-            unsafe_allow_html=True
-        )
-
 
 # ════════════════════════════════════════════════════════════
 # PAGE: AIMGUARD DEFENSE (train the protective noise pattern)
@@ -983,25 +971,6 @@ elif st.session_state.page == 'integrate':
     train_status = "🟡 Training in progress" \
         if st.session_state.training_done else "⚪ No active training"
     st.markdown(train_status)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    # Quick start
-    with st.container(border=True):
-     st.markdown("#### 💻 Quick Start")
-
-    st.markdown("**Install**")
-    st.code("pip install aimguard", language="bash")
-
-    st.markdown("**Usage**")
-    st.code("""# Load the trained noise file
-from aimguard import NoiseEngine
-
-engine    = NoiseEngine("universal_cloak/cs2/yolov5n/universal_noise.pt")
-protected = engine.generate_noise(frame)
-
-# frame    = numpy array (H x W x 3, uint8) from your game renderer
-# protected = same shape — pass this to your display output""",
-            language="python")
     st.markdown("</div>", unsafe_allow_html=True)
 
     # Integration guide
